@@ -1,0 +1,317 @@
+\documentclass[12pt]{article}
+
+\usepackage{sbc-template}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\usepackage{graphicx,url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,shapes.geometric,calc}
+
+\sloppy
+
+\title{Monitorador de Ormuz: uma Arquitetura Distribuída P2P para Despacho de Drones com Relógios de Lamport}
+
+\author{Nome do(a) Autor(a)\inst{1}}
+
+\address{Curso de Ciência da Computação -- Instituição de Ensino\\
+Cidade -- UF -- Brasil
+\email{email@exemplo.com}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  This paper presents Monitorador de Ormuz, a distributed system for simulated maritime monitoring in the Strait of Hormuz. The solution adopts peer-to-peer operational towers, TCP communication, Lamport logical clocks, deterministic request ownership, priority queues, deduplication, and automatic replanning after drone failures. The implementation was evaluated through unit tests that cover concurrent duplicate requests, criticality-based priority, and replanning after failures.
+\end{abstract}
+
+\begin{resumo}
+  Este artigo apresenta o Monitorador de Ormuz, um sistema distribuído para monitoramento marítimo simulado no Estreito de Ormuz. A solução adota torres operacionais em arquitetura par-a-par, comunicação TCP, relógios lógicos de Lamport, particionamento determinístico de requisições, filas de prioridade, deduplicação e replanejamento automático após falhas de drones. A implementação foi avaliada por testes unitários que cobrem duplicidade concorrente, prioridade por criticidade e replanejamento após falhas.
+\end{resumo}
+
+\section{Introdução}
+
+Sistemas distribuídos aplicados a monitoramento operacional precisam coordenar eventos produzidos por fontes independentes, tolerar falhas parciais e preservar decisões consistentes mesmo quando não há um relógio físico global. Esses desafios aparecem em cenários de vigilância marítima, nos quais sensores setoriais produzem ocorrências e centros operacionais precisam despachar recursos de resposta em tempo hábil. Como discutido por Tanenbaum e Van Steen~\cite{tanenbaum2017distributed}, a ausência de estado global único exige protocolos explícitos de comunicação, sincronização e tolerância a falhas.
+
+O projeto Monitorador de Ormuz implementa esse problema como uma simulação distribuída do Estreito de Ormuz. O sistema é composto por dez brokers de área, três torres operacionais com drones, uma interface web de observabilidade e módulos compartilhados para mensagens, relógios lógicos e modelos de dados. A arquitetura geral é apresentada na Figura~\ref{fig:arquitetura}; seus componentes e portas estão resumidos na Tabela~\ref{tab:componentes}. Todas as decisões operacionais de despacho ocorrem nas torres, enquanto a interface web apenas consulta estados e expõe comandos administrativos.
+
+O objetivo deste relatório é descrever a arquitetura, os algoritmos e a avaliação do sistema, respeitando o modelo de publicação da SBC. As contribuições principais são: uma arquitetura P2P sem coordenador central; um protocolo TCP com mensagens JSON delimitadas por quebra de linha; uso de relógios de Lamport para ordenação causal; deduplicação distribuída por conjuntos sincronizados; e replanejamento automático de missões após falha de drone.
+
+\section{Fundamentação}
+
+Em sistemas distribuídos, o tempo físico não é uma base confiável para ordenar eventos, pois máquinas distintas podem ter desvios de relógio. Lamport~\cite{lamport1978time} propôs relógios lógicos capazes de preservar a relação de causalidade: se um evento $a$ aconteceu antes de um evento $b$, então o timestamp lógico de $a$ é menor que o de $b$. O Monitorador de Ormuz aplica essa regra em cada broker de área e torre operacional.
+
+A comunicação operacional foi implementada sobre TCP, pois o protocolo fornece um fluxo confiável e ordenado entre processos, propriedade adequada para requisições de despacho e confirmações de estado~\cite{rfc9293}. O conteúdo das mensagens é codificado em JSON, formato padronizado pela RFC 8259~\cite{rfc8259}, e cada mensagem é encerrada por \texttt{\textbackslash n}. Esse enquadramento evita ambiguidade quando o TCP entrega dados fragmentados ou agrupados.
+
+O sistema também utiliza containers Docker para facilitar a execução dos serviços de torres, áreas e web~\cite{docker2024}. A camada de observabilidade foi construída com Flask~\cite{grinberg2018flask} e Socket.IO~\cite{socketio2024}, mas ela não interfere na decisão distribuída de despacho. Essa separação reduz acoplamento entre controle operacional e visualização.
+
+\section{Arquitetura do Sistema}
+
+A Figura~\ref{fig:arquitetura} sintetiza a arquitetura do sistema. Os brokers de área simulam sensores marítimos e enviam ocorrências por TCP para as torres. As torres formam uma rede P2P, calculam a proprietária de cada requisição, alocam drones e sincronizam metadados mínimos com seus pares. A interface web consulta as torres e áreas via HTTP para exibir o estado global.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tikzpicture}[
+    node distance=1.0cm,
+    box/.style={draw, rounded corners=4pt, thick, align=center, minimum height=0.9cm, minimum width=2.5cm, fill=white},
+    area/.style={box, fill=blue!6},
+    torre/.style={box, fill=green!8},
+    web/.style={box, fill=orange!10},
+    proto/.style={font=\small\bfseries},
+    arrow/.style={-{Latex[length=2.6mm]}, thick},
+    sync/.style={<->, >=Latex, thick, dashed}
+]
+\node[area] (a1) {Área 01\\TCP 7001\\HTTP 7101};
+\node[area, right=0.55cm of a1] (a2) {Área 02\\TCP 7002\\HTTP 7102};
+\node[area, right=0.55cm of a2] (a3) {Áreas 03--10\\TCP 7003--7010\\HTTP 7103--7110};
+
+\node[torre, below=2.2cm of a1] (t1) {Torre Alpha\\TCP 6001\\HTTP 6101};
+\node[torre, below=2.2cm of a2] (t2) {Torre Bravo\\TCP 6002\\HTTP 6102};
+\node[torre, below=2.2cm of a3] (t3) {Torre Charlie\\TCP 6003\\HTTP 6103};
+
+\node[web, below=2.0cm of t2] (w) {Painel Web\\Flask + Socket.IO\\HTTP 8080};
+
+\draw[arrow, blue!70!black] (a1) -- node[left, proto] {TCP/JSON} (t1);
+\draw[arrow, blue!70!black] (a2) -- node[right, proto] {SOLICITAR\_DRONE} (t2);
+\draw[arrow, blue!70!black] (a3) -- node[right, proto] {CONSULTA\_ESTADO} (t3);
+\draw[arrow, blue!70!black] (a1.south east) -- (t2.north west);
+\draw[arrow, blue!70!black] (a2.south east) -- (t3.north west);
+
+\draw[sync, green!40!black] (t1) -- node[above, proto] {SYNC\_ESTADO} (t2);
+\draw[sync, green!40!black] (t2) -- node[above, proto] {SYNC\_ESTADO} (t3);
+\draw[sync, green!40!black] (t1.south east) -- (t3.south west);
+
+\draw[arrow, orange!80!black] (w) -- node[left, proto] {HTTP polling} (t1);
+\draw[arrow, orange!80!black] (w) -- node[right, proto] {HTTP polling} (t2);
+\draw[arrow, orange!80!black] (w) -- node[right, proto] {HTTP polling} (t3);
+
+\node[draw, dashed, rounded corners=5pt, fit=(a1)(a2)(a3), inner sep=0.35cm, label={[font=\itshape]above:rede de áreas}] {};
+\node[draw, dashed, rounded corners=5pt, fit=(t1)(t2)(t3), inner sep=0.35cm, label={[font=\itshape]above:rede P2P de torres}] {};
+\end{tikzpicture}
+}
+\caption{Arquitetura geral do Monitorador de Ormuz. As áreas enviam ocorrências por TCP às torres, as torres sincronizam metadados entre pares e o painel web consulta estados via HTTP.}
+\label{fig:arquitetura}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Componentes do sistema e responsabilidades principais.}
+\label{tab:componentes}
+\begin{tabularx}{\textwidth}{>{\bfseries}p{2.7cm}p{3.2cm}X}
+\toprule
+Componente & Portas & Responsabilidade \\
+\midrule
+Brokers de área & TCP 7001--7010; HTTP 7101--7110 & Geram ocorrências automáticas ou manuais, consultam carga das torres e enviam requisições de drone. \\
+Torres operacionais & TCP 6001--6003; HTTP 6101--6103 & Mantêm drones, fila local, missões, histórico, peers, deduplicação, sincronização e replanejamento. \\
+Painel web & HTTP 8080 & Agrega estado via HTTP, exibe torres, áreas, drones, missões e oferece comandos administrativos. \\
+Módulos compartilhados & Biblioteca local & Definem modelos de dados, configurações, relógio de Lamport e protocolo de mensagens TCP. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Como indicado na Tabela~\ref{tab:componentes}, a decisão crítica não depende do painel web. Essa decisão é importante porque mantém o sistema operacional mesmo quando a interface está indisponível. A Figura~\ref{fig:arquitetura} também evidencia que não existe uma fila central: cada torre é autônoma e coopera com as demais por sincronização P2P.
+
+\section{Protocolo e Fluxo de Mensagens}
+
+O fluxo principal de atendimento é apresentado na Figura~\ref{fig:sequencia}. Antes de emitir uma requisição, o broker de área consulta a carga das torres acessíveis. Em seguida, envia \texttt{SOLICITAR\_DRONE}. A torre receptora calcula a proprietária determinística da requisição; caso outra torre deva ser responsável, a mensagem é encaminhada. A torre proprietária enfileira, aloca um drone livre e inicia a missão.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tikzpicture}[
+    lifeline/.style={draw, thick},
+    actor/.style={draw, rounded corners=3pt, fill=gray!8, minimum width=2.4cm, minimum height=0.7cm, align=center},
+    msg/.style={-{Latex[length=2.4mm]}, thick},
+    ret/.style={-{Latex[length=2.4mm]}, dashed, thick},
+    note/.style={draw, rounded corners=3pt, fill=yellow!12, align=left, font=\small}
+]
+\node[actor] (area) at (0,0) {Área};
+\node[actor] (entrada) at (3.4,0) {Torre\\entrada};
+\node[actor] (dona) at (6.8,0) {Torre\\proprietária};
+\node[actor] (drone) at (10.2,0) {Drone};
+\node[actor] (web) at (13.2,0) {Web};
+
+\foreach \x/\name in {0/area,3.4/entrada,6.8/dona,10.2/drone,13.2/web}
+  \draw[lifeline] (\x,-0.45) -- (\x,-6.6);
+
+\draw[msg] (area) -- node[above,font=\small] {CONSULTA\_ESTADO} (entrada);
+\draw[ret] (entrada.south west) -- node[above,font=\small] {ESTADO} (area.south east);
+\draw[msg] (0,-1.7) -- node[above,font=\small] {SOLICITAR\_DRONE + Lamport} (3.4,-1.7);
+\node[note] at (4.9,-2.35) {Calcula owner(req\_id)};
+\draw[msg] (3.4,-3.0) -- node[above,font=\small] {encaminha se necessário} (6.8,-3.0);
+\draw[ret] (6.8,-3.65) -- node[above,font=\small] {ACK} (3.4,-3.65);
+\draw[msg] (6.8,-4.3) -- node[above,font=\small] {reserva e executa missão} (10.2,-4.3);
+\draw[ret] (10.2,-4.95) -- node[above,font=\small] {heartbeat/liberação} (6.8,-4.95);
+\draw[msg] (13.2,-5.6) -- node[above,font=\small] {GET /estado} (6.8,-5.6);
+\end{tikzpicture}
+}
+\caption{Sequência simplificada de consulta, solicitação, encaminhamento, alocação e observabilidade.}
+\label{fig:sequencia}
+\end{figure}
+
+A Tabela~\ref{tab:mensagens} lista os principais tipos de mensagens. Cada uma carrega um campo \texttt{clock\_lamport}, atualizado no envio e no recebimento conforme a regra de Lamport~\cite{lamport1978time}. A referência à Tabela~\ref{tab:mensagens} é essencial porque o protocolo é o contrato entre áreas, torres e pares operacionais.
+
+\begin{table}[H]
+\centering
+\caption{Mensagens principais do protocolo TCP.}
+\label{tab:mensagens}
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{3.8cm}X}
+\toprule
+Tipo & Função \\
+\midrule
+SOLICITAR\_DRONE & Solicita atendimento para uma ocorrência gerada por área ou encaminhada por outra torre. \\
+CONSULTA\_ESTADO & Consulta carga, fila e missões de uma torre para orientar a escolha inicial da área. \\
+SYNC\_ESTADO & Sincroniza identificadores de requisições vistas e finalizadas entre torres. \\
+HEARTBEAT\_DRONE & Atualiza a vida de um drone em missão e ajuda a detectar falhas. \\
+FALHA\_DRONE & Remove drone falho e replaneja a requisição associada quando houver missão ativa. \\
+LIBERAR\_DRONE & Finaliza missão, libera drone, registra histórico e tenta atender a próxima requisição. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Algoritmos de Coordenação}
+
+O primeiro algoritmo relevante é a escolha da torre proprietária. Todas as torres calculam a mesma proprietária a partir do identificador da requisição, conforme a Equação~\ref{eq:owner}. Se a proprietária estiver indisponível, a sequência de tentativa segue um anel iniciado no mesmo índice. Essa regra reduz o risco de despacho duplicado e elimina a necessidade de coordenador central.
+
+\begin{equation}
+\label{eq:owner}
+owner(req) = torres\_ordenadas\left[\left(\sum bytes(req.id)\right) \bmod |torres|\right]
+\end{equation}
+
+O segundo algoritmo é a fila de prioridade. Cada requisição é ordenada pela tupla apresentada na Equação~\ref{eq:prioridade}. Ocorrências críticas recebem prioridade sobre normais; o relógio de Lamport desempata eventos com relação causal; o timestamp físico e o identificador fornecem desempates estáveis.
+
+\begin{equation}
+\label{eq:prioridade}
+prioridade(req) = (critica?0:1,\; clock\_lamport,\; timestamp,\; req.id)
+\end{equation}
+
+A Figura~\ref{fig:estados} apresenta o ciclo de vida de uma requisição. Ela pode entrar como pendente, ser alocada, concluída ou retornar à fila como replanejada. A transição de replanejamento ocorre quando um drone falha durante uma missão; nesse caso, a requisição torna-se crítica e volta à fila.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.95\textwidth}{!}{
+\begin{tikzpicture}[
+    state/.style={draw, rounded corners=4pt, fill=cyan!6, minimum width=2.6cm, minimum height=0.9cm, align=center},
+    final/.style={state, fill=green!10},
+    fail/.style={state, fill=red!8},
+    arr/.style={-{Latex[length=2.5mm]}, thick}
+]
+\node[state] (nova) {nova\\ocorrência};
+\node[state, right=1.3cm of nova] (pendente) {pendente\\na fila};
+\node[state, right=1.3cm of pendente] (alocada) {alocada\\a drone};
+\node[final, right=1.3cm of alocada] (concluida) {concluída\\no histórico};
+\node[fail, below=1.3cm of alocada] (replan) {replanejada\\crítica};
+
+\draw[arr] (nova) -- node[above,font=\small] {SOLICITAR} (pendente);
+\draw[arr] (pendente) -- node[above,font=\small] {drone livre} (alocada);
+\draw[arr] (alocada) -- node[above,font=\small] {LIBERAR} (concluida);
+\draw[arr] (alocada) -- node[right,font=\small] {falha/timeout} (replan);
+\draw[arr] (replan) -- node[left,font=\small] {reenfileira} (pendente);
+\end{tikzpicture}
+}
+\caption{Ciclo de vida de uma requisição de monitoramento no sistema.}
+\label{fig:estados}
+\end{figure}
+
+A deduplicação combina verificações locais e sincronização entre pares. Antes de inserir uma requisição na fila, a torre verifica se o identificador já aparece em requisições vistas, finalizadas, em missão ou já presentes no heap. Periodicamente, \texttt{SYNC\_ESTADO} compartilha conjuntos de identificadores vistos e finalizados. Assim, a Figura~\ref{fig:estados} deve ser lida junto com a Tabela~\ref{tab:mensagens}: a consistência observada no ciclo de vida depende do protocolo de sincronização.
+
+\section{Implementação}
+
+A implementação utiliza Python e organiza responsabilidades em quatro diretórios principais. Em \texttt{brokers/}, cada área executa o loop de geração de ocorrências e uma API HTTP para pausa, retomada e ocorrência manual. Em \texttt{torres/}, cada torre executa um servidor TCP multithread, uma API HTTP e rotinas de alocação, sincronização e monitoramento de heartbeat. Em \texttt{shared/}, ficam as dataclasses \texttt{Requisicao} e \texttt{Drone}, o relógio de Lamport e o framing TCP. Em \texttt{web/}, a aplicação Flask agrega os estados para o painel.
+
+A Figura~\ref{fig:implantacao} mostra a implantação esperada em containers. O projeto possui arquivos \texttt{docker-compose} separados para torres, brokers e web, o que permite tanto execução local quanto distribuição em máquinas distintas. Essa estratégia é coerente com o uso de containers para isolar serviços e reproduzir ambientes~\cite{docker2024}.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tikzpicture}[
+    host/.style={draw, rounded corners=4pt, dashed, inner sep=0.25cm},
+    svc/.style={draw, rounded corners=4pt, fill=gray!6, minimum width=2.7cm, minimum height=0.75cm, align=center},
+    arr/.style={-{Latex[length=2.5mm]}, thick}
+]
+\node[svc] (t1) {torre-1};
+\node[svc, below=0.35cm of t1] (t2) {torre-2};
+\node[svc, below=0.35cm of t2] (t3) {torre-3};
+\node[host, fit=(t1)(t2)(t3), label=above:{Máquina das torres}] (ht) {};
+
+\node[svc, right=2.6cm of t1] (a1) {area-01};
+\node[svc, below=0.35cm of a1] (a2) {area-02};
+\node[svc, below=0.35cm of a2] (a10) {area-03--area-10};
+\node[host, fit=(a1)(a2)(a10), label=above:{Máquina das áreas}] (ha) {};
+
+\node[svc, right=2.6cm of a2] (web) {web:8080};
+\node[host, fit=(web), label=above:{Máquina web}] (hw) {};
+
+\draw[arr, blue!70!black] (ha.west) -- node[above,font=\small] {TCP 6001--6003} (ht.east);
+\draw[arr, orange!80!black] (hw.west) -- node[above,font=\small] {HTTP 6101--6110} (ha.east);
+\draw[arr, orange!80!black] (hw.south west) -- ++(-1.5,-0.8) -- node[below,font=\small] {HTTP estado} ($(ht.south east)+(0,-0.8)$) -- (ht.south east);
+\end{tikzpicture}
+}
+\caption{Implantação em containers separando torres, áreas e interface web.}
+\label{fig:implantacao}
+\end{figure}
+
+\section{Avaliação}
+
+A avaliação automatizada concentra-se em propriedades críticas de corretude distribuída. A Tabela~\ref{tab:testes} descreve os casos cobertos pela suíte \texttt{unittest}. Embora os testes sejam locais, eles exercitam os pontos de maior risco: concorrência, prioridade e replanejamento.
+
+\begin{table}[H]
+\centering
+\caption{Casos de teste automatizados e propriedades verificadas.}
+\label{tab:testes}
+\begin{tabularx}{\textwidth}{p{4.1cm}X}
+\toprule
+Caso & Propriedade verificada \\
+\midrule
+Duplicidade concorrente & Cinquenta threads tentando enfileirar a mesma requisição não produzem duplo despacho. \\
+Prioridade por criticidade & Uma ocorrência crítica é atendida antes de uma normal, mesmo chegando depois. \\
+Falha de drone & Uma missão associada a drone falho é replanejada e reassociada a outro drone livre. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Os testes da Tabela~\ref{tab:testes} demonstram que os mecanismos internos preservam propriedades fundamentais em situações de disputa. O primeiro caso valida a deduplicação sob concorrência local; o segundo confirma que a fila respeita a Equação~\ref{eq:prioridade}; o terceiro confirma o retorno da requisição ao ciclo da Figura~\ref{fig:estados} após falha.
+
+Além dos testes automatizados, o projeto permite experimentos manuais por API: geração de ocorrência em uma área, consulta ao estado global, pausa e retomada de áreas, cadastro de drones e simulação de falha. Esses cenários são relevantes porque aproximam a execução da topologia representada nas Figuras~\ref{fig:arquitetura} e~\ref{fig:implantacao}.
+
+\section{Discussão}
+
+A arquitetura sem coordenador central aumenta a disponibilidade, pois a queda de uma torre não impede as demais de receberem e processarem ocorrências. Por outro lado, essa decisão exige mecanismos explícitos de owner determinístico, deduplicação e sincronização. A Tabela~\ref{tab:riscos} resume as principais decisões de projeto e seus impactos.
+
+\begin{table}[H]
+\centering
+\caption{Decisões de projeto, benefícios e limitações.}
+\label{tab:riscos}
+\begin{tabularx}{\textwidth}{p{3.2cm}p{4.5cm}X}
+\toprule
+Decisão & Benefício & Limitação \\
+\midrule
+Rede P2P de torres & Evita ponto único de falha e permite continuidade parcial. & Exige convergência por sincronização e tratamento de peers indisponíveis. \\
+TCP operacional & Entrega ordenada e confiável para requisições e ACKs. & Requer timeout, retentativas e framing explícito. \\
+Lamport & Ordena causalmente eventos distribuídos sem relógio físico global. & Não mede tempo real nem substitui métricas de latência. \\
+Estado replicado mínimo & Reduz tráfego e acoplamento entre torres. & Não fornece uma visão global perfeita da fila em todos os instantes. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Como mostrado na Tabela~\ref{tab:riscos}, a solução privilegia robustez e simplicidade operacional. Uma alternativa seria centralizar todas as decisões em um serviço único, mas isso reduziria a tolerância a falhas. Outra alternativa seria replicar o estado completo das filas, porém com maior custo de comunicação e maior complexidade de consistência. O desenho atual mantém apenas o necessário para evitar duplicatas e preservar decisões de despacho.
+
+\section{Conclusão}
+
+O Monitorador de Ormuz implementa uma solução distribuída coerente para despacho simulado de drones em um ambiente marítimo. O sistema combina brokers de área, torres P2P, relógios de Lamport, TCP com JSON, fila de prioridade, deduplicação e replanejamento automático. As Figuras~\ref{fig:arquitetura},~\ref{fig:sequencia},~\ref{fig:estados} e~\ref{fig:implantacao} mostram que a arquitetura separa claramente geração de eventos, decisão operacional e observabilidade.
+
+Os resultados da Tabela~\ref{tab:testes} indicam que os testes cobrem propriedades centrais do sistema: ausência de duplo despacho em concorrência, atendimento prioritário de ocorrências críticas e recuperação após falha de drone. Como trabalhos futuros, recomenda-se medir latência de despacho sob carga, registrar métricas de disponibilidade por torre, ampliar testes de falha de rede e comparar o particionamento determinístico atual com hashing consistente.
+
+\bibliographystyle{sbc}
+\bibliography{references}
+
+\end{document}
