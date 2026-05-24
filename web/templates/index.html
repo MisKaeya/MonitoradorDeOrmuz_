@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Estreito de Ormuz — TCP + Lamport</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link  href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" rel="stylesheet">
+<style>
+:root{--bg:#0b0f1a;--bg2:#111827;--bg3:#1c2539;--bd:#2a3550;
+  --tx:#e2e8f0;--mu:#64748b;--gr:#22c55e;--rd:#ef4444;
+  --yw:#eab308;--bl:#3b82f6;--pu:#a855f7;--tl:#14b8a6;--or:#f97316;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--tx);font-family:'Segoe UI',sans-serif;font-size:14px;}
+header{background:var(--bg2);border-bottom:1px solid var(--bd);padding:10px 20px;
+  display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+header h1{font-size:17px;font-weight:600;color:var(--tl);}
+#hinfo{display:flex;gap:16px;align-items:center;font-size:12px;color:var(--mu);}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--gr);display:inline-block;animation:p 2s infinite;}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+nav{background:var(--bg2);border-bottom:1px solid var(--bd);display:flex;padding:0 16px;gap:2px;}
+nav button{background:none;border:none;color:var(--mu);padding:9px 14px;cursor:pointer;
+  font-size:13px;border-bottom:2px solid transparent;transition:all .2s;}
+nav button.active{color:var(--tl);border-bottom-color:var(--tl);}
+nav button:hover{color:var(--tx);}
+.page{display:none;padding:18px;}
+.page.active{display:block;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.g5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:14px;}
+.ct{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--mu);margin-bottom:10px;}
+.stat .num{font-size:30px;font-weight:700;line-height:1;}
+.stat .lbl{font-size:11px;color:var(--mu);margin-top:3px;}
+.stat{text-align:center;}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;}
+.bg{background:#14532d44;color:var(--gr);}
+.br{background:#7f1d1d44;color:var(--rd);}
+.by{background:#71320044;color:var(--yw);}
+.bb{background:#1e3a5f44;color:var(--bl);}
+.bm{background:#4a1d6444;color:var(--pu);}
+.bc{background:#0f3a3a44;color:var(--tl);}
+.bx{background:var(--bg3);color:var(--mu);}
+table{width:100%;border-collapse:collapse;}
+th{font-size:11px;color:var(--mu);text-transform:uppercase;padding:6px 8px;
+  border-bottom:1px solid var(--bd);text-align:left;}
+td{padding:7px 8px;border-bottom:1px solid #ffffff08;font-size:13px;}
+tr:hover td{background:#ffffff06;}
+.clock-badge{background:#1e1040;color:var(--pu);border:1px solid var(--pu)44;
+  border-radius:4px;padding:2px 7px;font-size:11px;font-family:monospace;}
+#map{height:480px;border-radius:10px;border:1px solid var(--bd);}
+.tc{background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:12px;}
+.tc.on{border-left:3px solid var(--gr);}
+.tc.off{border-left:3px solid var(--rd);opacity:.6;}
+.dp{background:var(--bg3);border:1px solid var(--bd);border-radius:6px;
+  padding:5px 10px;font-size:12px;display:flex;justify-content:space-between;align-items:center;}
+.dp.liv{border-left:3px solid var(--gr);}
+.dp.mis{border-left:3px solid var(--or);}
+.ac{background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:10px;}
+.ac.pau{opacity:.55;border-color:var(--yw)66;}
+.ac.off{opacity:.4;}
+#feed{height:300px;overflow-y:auto;background:var(--bg);border:1px solid var(--bd);
+  border-radius:8px;padding:10px;font-family:monospace;font-size:12px;}
+.fe{padding:3px 0;border-bottom:1px solid #ffffff08;}
+.fc{color:var(--rd);} .fn{color:var(--yw);} .fo{color:var(--gr);} .fi{color:var(--mu);}
+.tl-item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start;
+  padding:8px;background:var(--bg3);border-radius:6px;margin-bottom:6px;}
+.tl-dot{width:10px;height:10px;border-radius:50%;margin-top:3px;}
+.tl-body{font-size:12px;}
+.tl-time{font-size:11px;color:var(--mu);white-space:nowrap;}
+button.btn{border:none;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;transition:opacity .15s;}
+button.btn:hover{opacity:.8;}
+.bg2c{background:var(--gr);color:#000;} .brc{background:var(--rd);color:#fff;}
+.bbc{background:var(--bl);color:#fff;} .byc{background:var(--yw);color:#000;}
+.bgrc{background:var(--bg3);color:var(--tx);border:1px solid var(--bd);}
+.mo{display:none;position:fixed;inset:0;background:#00000088;z-index:200;align-items:center;justify-content:center;}
+.mo.show{display:flex;}
+.md{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:22px;width:400px;max-width:95vw;}
+.md h3{font-size:15px;margin-bottom:14px;}
+.fg{margin-bottom:10px;}
+.fg label{font-size:12px;color:var(--mu);display:block;margin-bottom:3px;}
+.fg input,.fg select{width:100%;background:var(--bg3);border:1px solid var(--bd);
+  border-radius:6px;padding:7px 10px;color:var(--tx);font-size:13px;}
+.fg input:focus,.fg select:focus{outline:none;border-color:var(--tl);}
+.mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px;}
+@media(max-width:900px){.g2,.g3,.g4,.g5{grid-template-columns:1fr;}}
+
+/* Painel Lamport */
+.lamport-panel{background:#0f0820;border:1px solid var(--pu)44;border-radius:8px;padding:12px;margin-bottom:14px;}
+.lamport-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--pu);margin-bottom:8px;}
+.lamport-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.lp-item{background:#1a0d30;border:1px solid var(--pu)33;border-radius:6px;padding:8px;text-align:center;}
+.lp-item .lv{font-size:24px;font-weight:700;color:var(--pu);font-family:monospace;}
+.lp-item .ln{font-size:11px;color:var(--mu);margin-top:2px;}
+.toast{position:fixed;right:16px;bottom:16px;background:var(--bg2);border:1px solid var(--bd);
+  color:var(--tx);padding:10px 14px;border-radius:8px;z-index:300;box-shadow:0 8px 30px #0008;
+  display:none;max-width:360px;font-size:13px;}
+.toast.show{display:block;}
+.toast.ok{border-color:var(--gr);color:var(--gr);}
+.toast.err{border-color:var(--rd);color:var(--rd);}
+</style>
+</head>
+<body>
+<header>
+  <h1>🌊 Estreito de Ormuz — TCP + Relógios de Lamport</h1>
+  <div id="hinfo">
+    <span><span class="dot" id="dot"></span> <span id="ctxt">Conectando...</span></span>
+    <span id="lupd"></span>
+  </div>
+</header>
+
+<nav>
+  <button class="active" onclick="pg('dashboard',this)">📊 Dashboard</button>
+  <button onclick="pg('lamport',this)">⏱ Lamport</button>
+  <button onclick="pg('mapa',this)">🗺 Mapa</button>
+  <button onclick="pg('torres',this)">🏗 Torres</button>
+  <button onclick="pg('areas',this)">📡 Áreas</button>
+  <button onclick="pg('missoes',this)">⚔ Missões</button>
+  <button onclick="pg('historico',this)">📋 Histórico</button>
+  <button onclick="pg('crud',this)">⚙ CRUD</button>
+</nav>
+
+<!-- DASHBOARD -->
+<div id="page-dashboard" class="page active">
+  <div class="g4" style="margin-bottom:14px">
+    <div class="card stat"><div class="num" id="s-liv" style="color:var(--gr)">-</div><div class="lbl">Drones Livres</div></div>
+    <div class="card stat"><div class="num" id="s-mis" style="color:var(--or)">-</div><div class="lbl">Em Missão</div></div>
+    <div class="card stat"><div class="num" id="s-fil" style="color:var(--yw)">-</div><div class="lbl">Na Fila</div></div>
+    <div class="card stat"><div class="num" id="s-con" style="color:var(--tl)">-</div><div class="lbl">Concluídas</div></div>
+  </div>
+  <div class="g2">
+    <div class="card"><div class="ct">Torres</div><div id="d-torres"></div></div>
+    <div class="card"><div class="ct">Feed ao vivo</div><div id="feed"></div></div>
+  </div>
+</div>
+
+<!-- LAMPORT -->
+<div id="page-lamport" class="page">
+  <div class="card" style="margin-bottom:14px">
+    <div class="ct">Relógios de Lamport — Estado Atual</div>
+    <div class="lamport-grid" id="lp-grid"></div>
+  </div>
+  <div class="card">
+    <div class="ct">Últimas Requisições — ordenadas por clock Lamport</div>
+    <table>
+      <thead><tr>
+        <th>Clock ↑</th><th>ID</th><th>Prioridade</th><th>Área</th>
+        <th>Descrição</th><th>Torre</th><th>Status</th>
+      </tr></thead>
+      <tbody id="lp-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- MAPA -->
+<div id="page-mapa" class="page">
+  <div class="card" style="padding:10px">
+    <div class="ct" style="margin-bottom:6px">Mapa Operacional — Estreito de Ormuz</div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<!-- TORRES -->
+<div id="page-torres" class="page">
+  <div id="t-container" class="g3"></div>
+</div>
+
+<!-- AREAS -->
+<div id="page-areas" class="page">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn bbc" onclick="dispGlobal()">⚡ Ocorrência aleatória</button>
+  </div>
+  <div id="a-grid" class="g5"></div>
+</div>
+
+<!-- MISSOES -->
+<div id="page-missoes" class="page">
+  <div class="card">
+    <div class="ct">Missões Ativas</div>
+    <table>
+      <thead><tr>
+        <th>Clock</th><th>ID</th><th>Prior.</th><th>Área</th>
+        <th>Descrição</th><th>Drone</th><th>Torre</th><th>Rota</th>
+      </tr></thead>
+      <tbody id="m-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- HISTORICO -->
+<div id="page-historico" class="page">
+  <div class="card"><div class="ct">Histórico — ordenado por clock Lamport</div>
+    <div id="hist-list"></div>
+  </div>
+</div>
+
+<!-- CRUD -->
+<div id="page-crud" class="page">
+  <div class="g3">
+    <div class="card">
+      <div class="ct">Drones</div>
+      <button class="btn bg2c" style="width:100%;margin-bottom:10px" onclick="openM('drone')">+ Cadastrar Drone</button>
+      <div id="cr-drones"></div>
+    </div>
+    <div class="card">
+      <div class="ct">Torres</div>
+      <button class="btn bbc" style="width:100%;margin-bottom:10px" onclick="openM('torre')">+ Cadastrar Torre</button>
+      <div id="cr-torres"></div>
+    </div>
+    <div class="card">
+      <div class="ct">Áreas</div>
+      <button class="btn byc" style="width:100%;margin-bottom:10px" onclick="openM('area')">+ Cadastrar Área</button>
+      <div id="cr-areas"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAIS -->
+<div class="mo" id="mo-drone"><div class="md">
+  <h3>➕ Novo Drone</h3>
+  <div class="fg"><label>ID</label><input id="di" placeholder="ex: falcon-extra-1"></div>
+  <div class="fg"><label>Nome</label><input id="dn" placeholder="ex: Eagle-X1"></div>
+  <div class="fg"><label>Torre Base</label>
+    <select id="dt">
+      <option value="torre-1">Torre Alpha</option>
+      <option value="torre-2">Torre Bravo</option>
+      <option value="torre-3">Torre Charlie</option>
+    </select>
+  </div>
+  <div class="mbtns">
+    <button class="btn bgrc" onclick="closeM()">Cancelar</button>
+    <button class="btn bg2c" onclick="cadDrone()">Cadastrar</button>
+  </div>
+</div></div>
+
+<div class="mo" id="mo-torre"><div class="md">
+  <h3>➕ Nova Torre</h3>
+  <div class="fg"><label>ID</label><input id="ti" placeholder="ex: torre-4"></div>
+  <div class="fg"><label>Nome</label><input id="tn" placeholder="ex: Torre Delta"></div>
+  <div class="fg"><label>Host / IP</label><input id="th" placeholder="ex: 192.168.1.40"></div>
+  <div class="fg"><label>Porta TCP</label><input id="tp" type="number" placeholder="ex: 6004"></div>
+  <div class="mbtns">
+    <button class="btn bgrc" onclick="closeM()">Cancelar</button>
+    <button class="btn bbc" onclick="cadTorre()">Cadastrar</button>
+  </div>
+</div></div>
+
+<div class="mo" id="mo-area"><div class="md">
+  <h3>➕ Nova Área</h3>
+  <div class="fg"><label>ID</label><input id="ai" placeholder="ex: area-11"></div>
+  <div class="fg"><label>Nome</label><input id="an" placeholder="ex: Setor Kilo"></div>
+  <div class="fg"><label>Host / IP</label><input id="ah" placeholder="ex: 192.168.1.20"></div>
+  <div class="fg"><label>Porta HTTP</label><input id="ap" type="number" placeholder="ex: 7111"></div>
+  <div class="mbtns">
+    <button class="btn bgrc" onclick="closeM()">Cancelar</button>
+    <button class="btn byc" onclick="cadArea()">Cadastrar</button>
+  </div>
+</div></div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const socket = io();
+let E = {}, mapaOk = false, mapaObj = null, marks = {}, logVisto = new Set();
+
+socket.on('connect',    () => setConn(true));
+socket.on('disconnect', () => setConn(false));
+socket.on('estado', d  => { E = d; render(d); });
+
+function setConn(ok) {
+  document.getElementById('dot').style.background = ok ? 'var(--gr)' : 'var(--rd)';
+  document.getElementById('ctxt').textContent = ok ? 'Conectado (TCP + Lamport)' : 'Desconectado';
+}
+
+function pg(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'mapa') initMapa();
+  if (id === 'crud') renderCrud();
+}
+
+function render(d) {
+  document.getElementById('lupd').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  renderStats(d);
+  renderDashTorres(d.torres || []);
+  renderTorres(d.torres || []);
+  renderAreas(d.areas || []);
+  renderMissoes(d.missoes || []);
+  renderHistorico(d.historico || []);
+  renderLamport(d);
+  addFeed(d.missoes || []);
+  if (mapaOk) updateMapa(d);
+}
+
+function renderStats(d) {
+  const dr = d.drones || [];
+  document.getElementById('s-liv').textContent = dr.filter(x => x.disponivel).length;
+  document.getElementById('s-mis').textContent = dr.filter(x => !x.disponivel).length;
+  document.getElementById('s-fil').textContent = (d.torres||[]).reduce((s,t) => s+(t.fila_tamanho||0),0);
+  document.getElementById('s-con').textContent = (d.historico||[]).length;
+}
+
+function renderDashTorres(ts) {
+  document.getElementById('d-torres').innerHTML = ts.map(t => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--bd)44">
+      <div>
+        <span style="font-weight:500">${t.torre_nome||t.torre_id}</span>
+        <span class="badge ${t.online?'bg':'br'}" style="margin-left:6px">${t.online?'Online':'Offline'}</span>
+        <span class="clock-badge" style="margin-left:6px">L=${t.clock_lamport||0}</span>
+      </div>
+      <span style="font-size:12px;color:var(--mu)">${(t.drones||[]).filter(d=>d.disponivel).length}/${(t.drones||[]).length} livres | fila:${t.fila_tamanho||0}</span>
+    </div>`).join('');
+}
+
+function renderLamport(d) {
+  // Cards por torre
+  const grid = document.getElementById('lp-grid');
+  if (!grid) return;
+  grid.innerHTML = (d.torres||[]).map(t => `
+    <div class="lp-item">
+      <div class="lv">${t.clock_lamport||0}</div>
+      <div class="ln">${t.torre_nome||t.torre_id}</div>
+      <div style="font-size:10px;color:var(--mu);margin-top:2px">${t.online?'online':'offline'}</div>
+    </div>`).join('');
+
+  // Tabela ordenada por clock
+  const all = [...(d.missoes||[]), ...(d.historico||[])];
+  all.sort((a,b) => (a.clock_lamport||0) - (b.clock_lamport||0));
+  document.getElementById('lp-tbody').innerHTML = all.slice(0,30).map(m => `
+    <tr>
+      <td><span class="clock-badge">${m.clock_lamport||0}</span></td>
+      <td><code style="font-size:11px">${m.id}</code></td>
+      <td>${m.critica?'<span class="badge br">🔴 Crítica</span>':'<span class="badge by">🟡 Normal</span>'}</td>
+      <td style="font-size:12px">${m.area_nome||m.area_id}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${m.descricao}</td>
+      <td style="font-size:12px">${m.torre_id||'—'}</td>
+      <td><span class="badge ${m.status==='concluida'?'bg':m.status==='alocada'?'bb':'bx'}">${m.status}</span></td>
+    </tr>`).join('');
+}
+
+function renderTorres(ts) {
+  document.getElementById('t-container').innerHTML = ts.map(t => `
+    <div class="tc ${t.online?'on':'off'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <span style="font-weight:600;font-size:15px">${t.torre_nome||t.torre_id}</span>
+          <span class="badge ${t.online?'bg':'br'}" style="margin-left:6px">${t.online?'Online':'Offline'}</span>
+        </div>
+        <span class="clock-badge">L=${t.clock_lamport||0}</span>
+      </div>
+      <div style="font-size:12px;color:var(--mu);margin-bottom:8px">
+        Missões: ${t.requisicoes_ativas||0} | Fila: ${t.fila_tamanho||0}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+        ${(t.drones||[]).map(d=>`
+          <div class="dp ${d.disponivel?'liv':'mis'}">
+            <span>🚁 ${d.nome}</span>
+            <span class="badge ${d.disponivel?'bg':'by'}">${d.disponivel?'livre':'missão'}</span>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function renderAreas(areas) {
+  document.getElementById('a-grid').innerHTML = areas.map(a => `
+    <div class="ac ${a.pausada?'pau':''} ${!a.online?'off':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="font-size:12px;font-weight:500">${a.area_nome||a.area_id}</div>
+        <div style="display:flex;gap:4px">
+          ${a.pausada
+            ? `<button class="btn bg2c" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','retomar')">▶</button>`
+            : `<button class="btn byc" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','pausar')">⏸</button>`}
+          <button class="btn bbc" style="padding:3px 8px;font-size:11px" onclick="dispManual('${a.area_id}')">⚡</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--mu)">
+        ${a.total_req||0} req |
+        <span class="clock-badge" style="font-size:10px">L=${a.clock_lamport||0}</span>
+        <span class="badge ${a.online?'bg':'br'}" style="margin-left:4px">${a.online?'on':'off'}</span>
+      </div>
+    </div>`).join('');
+}
+
+function renderMissoes(ms) {
+  const tb = document.getElementById('m-tbody');
+  if (!ms.length) {
+    tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--mu);padding:18px">Nenhuma missão ativa</td></tr>';
+    return;
+  }
+  ms.sort((a,b)=>(a.clock_lamport||0)-(b.clock_lamport||0));
+  tb.innerHTML = ms.map(m=>`
+    <tr>
+      <td><span class="clock-badge">${m.clock_lamport||0}</span></td>
+      <td><code style="font-size:11px">${m.id}</code></td>
+      <td>${m.critica?'<span class="badge br">🔴</span>':'<span class="badge by">🟡</span>'}</td>
+      <td style="font-size:12px">${m.area_nome||m.area_id}</td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.descricao}</td>
+      <td style="font-size:12px">${m.drone_id||'—'}</td>
+      <td style="font-size:12px">${m.torre_id||'—'}</td>
+      <td style="font-size:11px;color:var(--mu)">${(m.rota||[]).join(' → ')}</td>
+    </tr>`).join('');
+}
+
+function renderHistorico(hist) {
+  hist = [...hist].sort((a,b)=>(b.clock_lamport||0)-(a.clock_lamport||0));
+  document.getElementById('hist-list').innerHTML = hist.map(m=>{
+    const ts = new Date(m.timestamp*1000).toLocaleTimeString('pt-BR');
+    return `<div class="tl-item">
+      <div class="tl-dot" style="background:${m.critica?'var(--rd)':'var(--tl)'}"></div>
+      <div class="tl-body">
+        <div style="font-weight:500">${m.descricao}</div>
+        <div style="color:var(--mu);font-size:11px">${m.area_nome||m.area_id} → drone ${m.drone_id||'?'} via ${m.torre_id||'?'}</div>
+      </div>
+      <div class="tl-time">
+        <span class="clock-badge" style="display:block;margin-bottom:2px">L=${m.clock_lamport||0}</span>
+        ${ts}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addFeed(missoes) {
+  const feed = document.getElementById('feed');
+  missoes.forEach(m => {
+    if (!logVisto.has(m.id)) {
+      logVisto.add(m.id);
+      const ts = new Date().toLocaleTimeString('pt-BR');
+      const cls = m.critica ? 'fc' : 'fn';
+      feed.insertAdjacentHTML('afterbegin',
+        `<div class="fe ${cls}">[${ts}][L=${m.clock_lamport||0}] ${m.critica?'🔴':'🟡'} ${m.area_nome} → ${m.descricao}</div>`);
+      while(feed.children.length > 60) feed.lastChild.remove();
+    }
+  });
+}
+
+// MAPA
+function initMapa() {
+  if (mapaOk) return; mapaOk = true;
+  mapaObj = L.map('map').setView([26.55,57.5],8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {attribution:'© OpenStreetMap'}).addTo(mapaObj);
+  if (E.coordenadas_areas) updateMapa(E);
+}
+
+function updateMapa(d) {
+  Object.entries(d.coordenadas_areas||{}).forEach(([id,c])=>{
+    const a   = (d.areas||[]).find(x=>x.area_id===id);
+    const cor = !a||!a.online?'#ef4444':a.pausada?'#eab308':'#14b8a6';
+    if (!marks['a_'+id]) {
+      marks['a_'+id] = L.circleMarker([c.lat,c.lon],{radius:9,color:cor,fillColor:cor,fillOpacity:.7,weight:2})
+        .addTo(mapaObj).bindPopup(`<b>${c.nome}</b><br>L=${a?.clock_lamport||0}`);
+    } else marks['a_'+id].setStyle({color:cor,fillColor:cor});
+  });
+  Object.entries(d.coordenadas_torres||{}).forEach(([id,c])=>{
+    if (!marks['t_'+id]) {
+      const icon = L.divIcon({html:'<div style="font-size:22px">🏗</div>',className:''});
+      const t = (d.torres||[]).find(x=>x.torre_id===id);
+      marks['t_'+id] = L.marker([c.lat,c.lon],{icon}).addTo(mapaObj)
+        .bindPopup(`<b>${c.nome}</b><br>clock L=${t?.clock_lamport||0}`);
+    }
+  });
+  (d.missoes||[]).forEach(m=>{
+    if (!m.rota||m.rota.length<2) return;
+    if (!marks['r_'+m.id]) {
+      const pts = m.rota.map(p=>{const[la,lo]=p.split(',');return[parseFloat(la),parseFloat(lo)];});
+      marks['r_'+m.id] = L.polyline(pts,{color:'#f97316',weight:2,dashArray:'5,5'}).addTo(mapaObj);
+    }
+  });
+}
+
+// AÇÕES
+function acao(id, tipo) { fetch(`/api/areas/${id}/${tipo}`,{method:'POST'}); }
+function dispManual(id) {
+  const evs=[{descricao:"Embarcação civil à deriva",critica:true},{descricao:"Falha de sinalização",critica:false},
+             {descricao:"Objeto não identificado",critica:true},{descricao:"Congestionamento",critica:false}];
+  const ev=evs[Math.floor(Math.random()*evs.length)];
+  fetch(`/api/areas/${id}/ocorrencia`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)});
+}
+function dispGlobal() {
+  const online=(E.areas||[]).filter(a=>a.online&&!a.pausada);
+  if (online.length) dispManual(online[Math.floor(Math.random()*online.length)].area_id);
+}
+
+// CRUD
+function openM(t) { document.getElementById('mo-'+t).classList.add('show'); }
+function closeM() { document.querySelectorAll('.mo').forEach(m=>m.classList.remove('show')); }
+
+function toast(msg, ok=true) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast show ${ok ? 'ok' : 'err'}`;
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => el.className = 'toast', 3200);
+}
+
+async function apiFetch(url, opts={}, msgOk='Operação realizada') {
+  const r = await fetch(url, opts);
+  let data = {};
+  try { data = await r.json(); } catch (_) {}
+  if (!r.ok || data.erro) throw new Error(data.erro || `HTTP ${r.status}`);
+  toast(msgOk);
+  return data;
+}
+
+function cadDrone() {
+  apiFetch('/api/drones',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:document.getElementById('di').value||null,
+      nome:document.getElementById('dn').value,torre_base:document.getElementById('dt').value})},
+      'Drone cadastrado')
+  .then(()=>{closeM();setTimeout(renderCrud,500);})
+  .catch(e=>toast('Falha ao cadastrar drone: '+e.message,false));
+}
+function cadTorre() {
+  apiFetch('/api/torres',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:document.getElementById('ti').value,nome:document.getElementById('tn').value,
+      host:document.getElementById('th').value,porta:parseInt(document.getElementById('tp').value)})},
+      'Torre cadastrada')
+  .then(()=>{closeM();setTimeout(renderCrud,500);})
+  .catch(e=>toast('Falha ao cadastrar torre: '+e.message,false));
+}
+function cadArea() {
+  apiFetch('/api/areas',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:document.getElementById('ai').value,nome:document.getElementById('an').value,
+      host:document.getElementById('ah').value,porta:parseInt(document.getElementById('ap').value)})},
+      'Área cadastrada')
+  .then(()=>{closeM();setTimeout(renderCrud,500);})
+  .catch(e=>toast('Falha ao cadastrar área: '+e.message,false));
+}
+function rmDrone(id){if(confirm('Remover drone '+id+'?'))apiFetch('/api/drones/'+id,{method:'DELETE'},'Drone removido').then(renderCrud).catch(e=>toast(e.message,false));}
+function rmTorre(id){if(confirm('Remover torre '+id+'?'))apiFetch('/api/torres/'+id,{method:'DELETE'},'Torre removida').then(renderCrud).catch(e=>toast(e.message,false));}
+function rmArea(id) {if(confirm('Remover área '+id+'?'))apiFetch('/api/areas/'+id, {method:'DELETE'},'Área removida').then(renderCrud).catch(e=>toast(e.message,false));}
+
+function renderCrud() {
+  fetch('/api/drones').then(r=>r.json()).then(ds=>{
+    document.getElementById('cr-drones').innerHTML=ds.length ? ds.map(d=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
+        <div><span style="font-weight:500">${d.nome}</span><span style="font-size:11px;color:var(--mu);margin-left:6px">${d.id}</span></div>
+        <button class="btn brc" onclick="rmDrone('${d.id}')">🗑</button>
+      </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhum drone encontrado. Verifique se as torres estão online.</div>';
+  });
+  fetch('/api/torres').then(r=>r.json()).then(ts=>{
+    document.getElementById('cr-torres').innerHTML=ts.length ? ts.map(t=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
+        <div>
+          <span style="font-weight:500">${t.torre_nome||t.torre_id}</span>
+          <span class="clock-badge" style="margin-left:4px">L=${t.clock_lamport||0}</span>
+        </div>
+        <button class="btn brc" onclick="rmTorre('${t.torre_id||t.id}')">🗑</button>
+      </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhuma torre cadastrada.</div>';
+  });
+  fetch('/api/areas').then(r=>r.json()).then(as=>{
+    document.getElementById('cr-areas').innerHTML=as.length ? as.map(a=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
+        <div style="font-size:12px">${a.area_nome||a.area_id}</div>
+        <button class="btn brc" onclick="rmArea('${a.area_id}')">🗑</button>
+      </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhuma área cadastrada.</div>';
+  });
+}
+
+document.querySelectorAll('.mo').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)closeM();}));
+</script>
+</body>
+</html>

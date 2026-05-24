@@ -1,0 +1,136 @@
+# MÁQUINA 2 — 10 Áreas/Brokers com TCP + Lamport
+# docker compose -f docker-compose.brokers.yml up --build
+networks:
+  ormuz-brokers:
+    driver: bridge
+
+services:
+  area-01:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_01.py } }
+    container_name: area-01
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-01
+      AREA_NOME: "Setor Alfa — Canal Norte"
+      AREA_PORT: "7001"
+      AREA_HTTP_PORT: "7101"
+    ports: ["7001:7001","7101:7101"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-02:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_02.py } }
+    container_name: area-02
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-02
+      AREA_NOME: "Setor Bravo — Entrada Sul"
+      AREA_PORT: "7002"
+      AREA_HTTP_PORT: "7102"
+    ports: ["7002:7002","7102:7102"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-03:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_03.py } }
+    container_name: area-03
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-03
+      AREA_NOME: "Setor Charlie — Rota Central"
+      AREA_PORT: "7003"
+      AREA_HTTP_PORT: "7103"
+    ports: ["7003:7003","7103:7103"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-04:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_04.py } }
+    container_name: area-04
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-04
+      AREA_NOME: "Setor Delta — Corredor Leste"
+      AREA_PORT: "7004"
+      AREA_HTTP_PORT: "7104"
+    ports: ["7004:7004","7104:7104"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-05:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_05.py } }
+    container_name: area-05
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-05
+      AREA_NOME: "Setor Echo — Zona Costeira"
+      AREA_PORT: "7005"
+      AREA_HTTP_PORT: "7105"
+    ports: ["7005:7005","7105:7105"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-06:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_06.py } }
+    container_name: area-06
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-06
+      AREA_NOME: "Setor Foxtrot — Rota Comercial"
+      AREA_PORT: "7006"
+      AREA_HTTP_PORT: "7106"
+    ports: ["7006:7006","7106:7106"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-07:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_07.py } }
+    container_name: area-07
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-07
+      AREA_NOME: "Setor Golf — Passagem Estreita"
+      AREA_PORT: "7007"
+      AREA_HTTP_PORT: "7107"
+    ports: ["7007:7007","7107:7107"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-08:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_08.py } }
+    container_name: area-08
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-08
+      AREA_NOME: "Setor Hotel — Águas Profundas"
+      AREA_PORT: "7008"
+      AREA_HTTP_PORT: "7108"
+    ports: ["7008:7008","7108:7108"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-09:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_09.py } }
+    container_name: area-09
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-09
+      AREA_NOME: "Setor India — Zona de Exclusão"
+      AREA_PORT: "7009"
+      AREA_HTTP_PORT: "7109"
+    ports: ["7009:7009","7109:7109"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
+
+  area-10:
+    build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_10.py } }
+    container_name: area-10
+    environment:
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
+      AREA_ID: area-10
+      AREA_NOME: "Setor Juliet — Ponto de Ancoragem"
+      AREA_PORT: "7010"
+      AREA_HTTP_PORT: "7110"
+    ports: ["7010:7010","7110:7110"]
+    networks: [ormuz-brokers]
+    restart: unless-stopped
