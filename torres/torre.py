@@ -51,6 +51,9 @@ historico: list[Requisicao] = []
 req_vistas: set[str] = set()
 req_finalizadas: set[str] = set()
 peers: dict[str, dict] = {}
+peer_snapshots: dict[str, dict] = {}
+peers_offline: set[str] = set()
+redistribuicoes: list[dict] = []
 
 
 def log(msg, cor=C):
@@ -132,6 +135,8 @@ class TorreHandler(BaseRequestHandler):
             return _handle_falha_drone(payload)
         if tipo == "SYNC_ESTADO":
             return _handle_sync(payload)
+        if tipo == "REDISTRIBUIR_TORRE":
+            return _handle_redistribuir_torre(payload)
         if tipo == "CONSULTA_ESTADO":
             return {"tipo": "ESTADO", "payload": _montar_estado()}
         if tipo == "CADASTRAR_DRONE":
@@ -282,6 +287,7 @@ def _handle_falha_drone(payload: dict) -> dict:
     drone_id = payload.get("drone_id")
     with _lock:
         drone = drones.pop(drone_id, None)
+        encontrado = drone is not None
         req_id = drone.requisicao_atual if drone else payload.get("req_id")
         req = missoes.pop(req_id, None) if req_id else None
         if req:
@@ -296,11 +302,23 @@ def _handle_falha_drone(payload: dict) -> dict:
         log(f"Falha do drone {drone_id}; req {req_id} voltou para a fila", R)
     threading.Thread(target=_sync_peers, daemon=True).start()
     threading.Thread(target=_tentar_alocar, daemon=True).start()
-    return {"tipo": "ACK", "payload": {"status": "falha_registrada", "drone_id": drone_id, "req_id": req_id}}
+    return {
+        "tipo": "ACK",
+        "payload": {
+            "status": "falha_registrada" if encontrado or req_id else "nao_encontrado",
+            "encontrado": encontrado,
+            "drone_id": drone_id,
+            "req_id": req_id,
+        },
+    }
 
 
 def _handle_sync(payload: dict) -> dict:
     with _lock:
+        torre_id = payload.get("torre_id")
+        if torre_id and torre_id != TORRE_ID:
+            peer_snapshots[torre_id] = payload
+            peers_offline.discard(torre_id)
         req_vistas.update(payload.get("req_ids_vistas", []))
         req_finalizadas.update(payload.get("req_ids_finalizadas", []))
     return {"tipo": "ACK_SYNC", "payload": {"ok": True}}
@@ -310,11 +328,108 @@ def _sync_peers():
     with _lock:
         snap = {
             "torre_id": TORRE_ID,
+            "torre_nome": TORRE_NOME,
             "req_ids_vistas": list(req_vistas),
             "req_ids_finalizadas": list(req_finalizadas),
+            "fila": [item[2].to_dict() for item in sorted(fila)],
+            "missoes": [r.to_dict() for r in missoes.values()],
+            "drones": [d.to_dict() for d in drones.values()],
+            "clock_lamport": relogio.valor,
+            "timestamp": time.time(),
         }
     for tid in list(peers.keys()):
         _enviar_tcp(tid, "SYNC_ESTADO", snap, tentativas=1)
+
+
+def _responsavel_por_peer_indisponivel(torre_id: str) -> str | None:
+    ativos = sorted({TORRE_ID, *peers.keys()} - {torre_id, *peers_offline})
+    if not ativos:
+        return None
+    return ativos[sum(torre_id.encode("utf-8")) % len(ativos)]
+
+
+def _registrar_redistribuicao(torre_id: str, drones_qtd: int, reqs_qtd: int):
+    redistribuicoes.insert(
+        0,
+        {
+            "torre_origem": torre_id,
+            "torre_destino": TORRE_ID,
+            "drones": drones_qtd,
+            "requisicoes": reqs_qtd,
+            "clock_lamport": relogio.tick(),
+            "timestamp": time.time(),
+        },
+    )
+    del redistribuicoes[30:]
+
+
+def _assumir_snapshot_torre(torre_id: str, motivo: str = "falha_torre") -> dict:
+    with _lock:
+        snap = peer_snapshots.get(torre_id)
+        if not snap:
+            return {"ok": False, "msg": "sem snapshot da torre", "torre_id": torre_id}
+
+        responsavel = _responsavel_por_peer_indisponivel(torre_id)
+        if responsavel and responsavel != TORRE_ID:
+            return {
+                "ok": False,
+                "msg": "redistribuicao delegada",
+                "torre_id": torre_id,
+                "responsavel": responsavel,
+            }
+
+        drones_assumidos = 0
+        reqs_replanejadas = 0
+
+        for item in snap.get("drones", []):
+            drone = Drone.from_dict(item)
+            if drone.id in drones:
+                continue
+            drone.torre_base = TORRE_ID
+            drone.disponivel = True
+            drone.requisicao_atual = None
+            drone.ultimo_heartbeat = time.time()
+            drones[drone.id] = drone
+            drones_assumidos += 1
+
+        pendentes = list(snap.get("fila", [])) + list(snap.get("missoes", []))
+        for item in pendentes:
+            req = Requisicao.from_dict(item)
+            if req.id in req_finalizadas or req.id in missoes or any(f[2].id == req.id for f in fila):
+                continue
+            req.status = "redistribuida"
+            req.critica = True
+            req.drone_id = None
+            req.torre_id = TORRE_ID
+            req.clock_lamport = relogio.tick()
+            if _enfileirar(req):
+                reqs_replanejadas += 1
+
+        peers_offline.add(torre_id)
+        _registrar_redistribuicao(torre_id, drones_assumidos, reqs_replanejadas)
+
+    if drones_assumidos or reqs_replanejadas:
+        log(
+            f"Redistribuicao por {motivo}: {torre_id} -> {TORRE_ID}; "
+            f"drones={drones_assumidos} reqs={reqs_replanejadas}",
+            R,
+        )
+    threading.Thread(target=_sync_peers, daemon=True).start()
+    threading.Thread(target=_tentar_alocar, daemon=True).start()
+    return {
+        "ok": True,
+        "torre_id": torre_id,
+        "torre_destino": TORRE_ID,
+        "drones": drones_assumidos,
+        "requisicoes": reqs_replanejadas,
+    }
+
+
+def _handle_redistribuir_torre(payload: dict) -> dict:
+    torre_id = payload.get("torre_id")
+    if not torre_id:
+        return {"tipo": "ERRO", "payload": {"erro": "torre_id obrigatorio"}}
+    return {"tipo": "ACK", "payload": _assumir_snapshot_torre(torre_id, "comando")}
 
 
 def _handle_heartbeat(payload: dict) -> dict:
@@ -404,6 +519,36 @@ def _monitor_heartbeat():
             _handle_falha_drone({"drone_id": drone_id})
 
 
+def _monitor_peers():
+    while True:
+        time.sleep(6)
+        for torre_id in list(peers.keys()):
+            if torre_id in peers_offline:
+                continue
+            resp = _enviar_tcp_e_receber(torre_id, "CONSULTA_ESTADO", {}, tentativas=1)
+            if resp is None:
+                with _lock:
+                    tem_snapshot = torre_id in peer_snapshots
+                    peers_offline.add(torre_id)
+                if tem_snapshot:
+                    _assumir_snapshot_torre(torre_id, "timeout_peer")
+            elif resp.get("tipo") == "ESTADO":
+                with _lock:
+                    payload = resp.get("payload", {})
+                    peer_snapshots[torre_id] = {
+                        "torre_id": torre_id,
+                        "torre_nome": payload.get("torre_nome", torre_id),
+                        "fila": payload.get("fila", []),
+                        "missoes": payload.get("missoes", []),
+                        "drones": payload.get("drones", []),
+                        "req_ids_vistas": payload.get("req_ids_vistas", []),
+                        "req_ids_finalizadas": payload.get("req_ids_finalizadas", []),
+                        "clock_lamport": payload.get("clock_lamport", 0),
+                        "timestamp": payload.get("timestamp", time.time()),
+                    }
+                    peers_offline.discard(torre_id)
+
+
 def _montar_estado() -> dict:
     with _lock:
         return {
@@ -416,7 +561,11 @@ def _montar_estado() -> dict:
             "drones": [d.to_dict() for d in drones.values()],
             "missoes": [r.to_dict() for r in missoes.values()],
             "historico": [r.to_dict() for r in historico[:20]],
+            "redistribuicoes": list(redistribuicoes),
             "peers": list(peers.keys()),
+            "peers_offline": sorted(peers_offline),
+            "req_ids_vistas": list(req_vistas),
+            "req_ids_finalizadas": list(req_finalizadas),
             "timestamp": time.time(),
         }
 
@@ -469,6 +618,9 @@ class HTTPHandler(BaseHTTPRequestHandler):
         elif self.path == "/liberar_drone":
             resp = _handle_liberar_drone(body)
             self._json(resp["payload"])
+        elif self.path == "/redistribuir_torre":
+            resp = _handle_redistribuir_torre(body)
+            self._json(resp["payload"], 200 if resp["tipo"] == "ACK" else 400)
         else:
             self._json({"erro": "rota nao encontrada"}, 404)
 
@@ -493,6 +645,7 @@ if __name__ == "__main__":
     _init_drones()
 
     threading.Thread(target=_monitor_heartbeat, daemon=True).start()
+    threading.Thread(target=_monitor_peers, daemon=True).start()
     threading.Thread(target=_start_http, daemon=True).start()
 
     srv = ReusableThreadingTCPServer(("0.0.0.0", TORRE_PORT), TorreHandler)

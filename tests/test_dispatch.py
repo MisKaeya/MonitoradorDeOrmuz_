@@ -25,6 +25,9 @@ class DispatchTest(unittest.TestCase):
             torre.req_vistas.clear()
             torre.req_finalizadas.clear()
             torre.peers.clear()
+            torre.peer_snapshots.clear()
+            torre.peers_offline.clear()
+            torre.redistribuicoes.clear()
             torre.drones["drone-a"] = Drone(id="drone-a", nome="Drone A", torre_base=torre.TORRE_ID)
         torre._sync_peers = lambda: None
         torre._executar_missao = lambda drone_id, req_id: None
@@ -71,6 +74,36 @@ class DispatchTest(unittest.TestCase):
         self.assertNotIn("drone-a", torre.drones)
         self.assertIn("req-falha", torre.missoes)
         self.assertEqual(torre.missoes["req-falha"].drone_id, "drone-b")
+
+    def test_falha_de_torre_redistribui_snapshot(self):
+        torre.drones.clear()
+        req = Requisicao(
+            id="req-peer",
+            area_id="area-02",
+            critica=False,
+            clock_lamport=7,
+            status="alocada",
+            drone_id="peer-drone",
+            torre_id="torre-2",
+        )
+        torre.peer_snapshots["torre-2"] = {
+            "torre_id": "torre-2",
+            "drones": [Drone(id="peer-drone", nome="Peer Drone", torre_base="torre-2", disponivel=False, requisicao_atual="req-peer").to_dict()],
+            "missoes": [req.to_dict()],
+            "fila": [],
+            "req_ids_vistas": ["req-peer"],
+            "req_ids_finalizadas": [],
+        }
+
+        resp = torre._assumir_snapshot_torre("torre-2", "teste")
+        torre._tentar_alocar()
+
+        self.assertTrue(resp["ok"])
+        self.assertIn("peer-drone", torre.drones)
+        self.assertEqual(torre.drones["peer-drone"].torre_base, torre.TORRE_ID)
+        self.assertIn("req-peer", torre.missoes)
+        self.assertEqual(torre.missoes["req-peer"].status, "alocada")
+        self.assertEqual(torre.redistribuicoes[0]["torre_origem"], "torre-2")
 
 
 if __name__ == "__main__":

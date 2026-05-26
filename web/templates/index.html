@@ -136,6 +136,10 @@ button.btn:hover{opacity:.8;}
     <div class="card"><div class="ct">Torres</div><div id="d-torres"></div></div>
     <div class="card"><div class="ct">Feed ao vivo</div><div id="feed"></div></div>
   </div>
+  <div class="card" style="margin-top:14px">
+    <div class="ct">Redistribuições</div>
+    <div id="redist-list"></div>
+  </div>
 </div>
 
 <!-- LAMPORT -->
@@ -172,7 +176,7 @@ button.btn:hover{opacity:.8;}
 <!-- AREAS -->
 <div id="page-areas" class="page">
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-    <button class="btn bbc" onclick="dispGlobal()">⚡ Ocorrência aleatória</button>
+    <button class="btn bbc" onclick="openOcorrencia()">⚡ Nova ocorrência</button>
   </div>
   <div id="a-grid" class="g5"></div>
 </div>
@@ -261,6 +265,22 @@ button.btn:hover{opacity:.8;}
   </div>
 </div></div>
 
+<div class="mo" id="mo-ocorrencia"><div class="md">
+  <h3>⚡ Nova Ocorrência</h3>
+  <div class="fg"><label>Área</label><select id="oa"></select></div>
+  <div class="fg"><label>Descrição</label><input id="od" placeholder="ex: Embarcação sem transponder"></div>
+  <div class="fg"><label>Prioridade</label>
+    <select id="oc">
+      <option value="false">Normal</option>
+      <option value="true">Crítica</option>
+    </select>
+  </div>
+  <div class="mbtns">
+    <button class="btn bgrc" onclick="closeM()">Cancelar</button>
+    <button class="btn bbc" onclick="cadOcorrencia()">Disparar</button>
+  </div>
+</div></div>
+
 <div id="toast" class="toast"></div>
 
 <script>
@@ -293,6 +313,7 @@ function render(d) {
   renderAreas(d.areas || []);
   renderMissoes(d.missoes || []);
   renderHistorico(d.historico || []);
+  renderRedistribuicoes(d.redistribuicoes || []);
   renderLamport(d);
   addFeed(d.missoes || []);
   if (mapaOk) updateMapa(d);
@@ -357,11 +378,17 @@ function renderTorres(ts) {
       <div style="font-size:12px;color:var(--mu);margin-bottom:8px">
         Missões: ${t.requisicoes_ativas||0} | Fila: ${t.fila_tamanho||0}
       </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        ${!t.online ? `<button class="btn bbc" onclick="redistribuirTorre('${t.torre_id}')">Redistribuir</button>` : ''}
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
         ${(t.drones||[]).map(d=>`
           <div class="dp ${d.disponivel?'liv':'mis'}">
             <span>🚁 ${d.nome}</span>
-            <span class="badge ${d.disponivel?'bg':'by'}">${d.disponivel?'livre':'missão'}</span>
+            <span>
+              <span class="badge ${d.disponivel?'bg':'by'}">${d.disponivel?'livre':'missão'}</span>
+              <button class="btn brc" style="padding:2px 6px;margin-left:4px" onclick="falhaDrone('${d.id}')">falha</button>
+            </span>
           </div>`).join('')}
       </div>
     </div>`).join('');
@@ -376,13 +403,18 @@ function renderAreas(areas) {
           ${a.pausada
             ? `<button class="btn bg2c" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','retomar')">▶</button>`
             : `<button class="btn byc" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','pausar')">⏸</button>`}
-          <button class="btn bbc" style="padding:3px 8px;font-size:11px" onclick="dispManual('${a.area_id}')">⚡</button>
+          <button class="btn bbc" style="padding:3px 8px;font-size:11px" onclick="openOcorrencia('${a.area_id}')">⚡</button>
         </div>
       </div>
       <div style="font-size:11px;color:var(--mu)">
         ${a.total_req||0} req |
         <span class="clock-badge" style="font-size:10px">L=${a.clock_lamport||0}</span>
         <span class="badge ${a.online?'bg':'br'}" style="margin-left:4px">${a.online?'on':'off'}</span>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:8px">
+        <input id="iv-${a.area_id}" type="number" min="2" value="${Math.round(a.intervalo||10)}"
+          style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:5px;color:var(--tx);padding:3px 5px;font-size:11px">
+        <button class="btn bgrc" style="padding:3px 8px;font-size:11px" onclick="setIntervalo('${a.area_id}')">salvar</button>
       </div>
     </div>`).join('');
 }
@@ -421,6 +453,25 @@ function renderHistorico(hist) {
         <span class="clock-badge" style="display:block;margin-bottom:2px">L=${m.clock_lamport||0}</span>
         ${ts}
       </div>
+    </div>`;
+  }).join('');
+}
+
+function renderRedistribuicoes(items) {
+  const el = document.getElementById('redist-list');
+  if (!items.length) {
+    el.innerHTML = '<div style="color:var(--mu);font-size:12px">Nenhuma redistribuição registrada.</div>';
+    return;
+  }
+  el.innerHTML = items.slice(0,8).map(x => {
+    const ts = new Date((x.timestamp||0)*1000).toLocaleTimeString('pt-BR');
+    return `<div class="tl-item">
+      <div class="tl-dot" style="background:var(--bl)"></div>
+      <div class="tl-body">
+        <div style="font-weight:500">${x.torre_origem} → ${x.torre_destino}</div>
+        <div style="color:var(--mu);font-size:11px">${x.drones||0} drones assumidos; ${x.requisicoes||0} requisições replanejadas</div>
+      </div>
+      <div class="tl-time"><span class="clock-badge">L=${x.clock_lamport||0}</span><br>${ts}</div>
     </div>`;
   }).join('');
 }
@@ -475,16 +526,44 @@ function updateMapa(d) {
 }
 
 // AÇÕES
-function acao(id, tipo) { fetch(`/api/areas/${id}/${tipo}`,{method:'POST'}); }
+function acao(id, tipo) {
+  apiFetch(`/api/areas/${id}/${tipo}`,{method:'POST'}, tipo === 'pausar' ? 'Área pausada' : 'Área retomada')
+    .catch(e=>toast(e.message,false));
+}
 function dispManual(id) {
   const evs=[{descricao:"Embarcação civil à deriva",critica:true},{descricao:"Falha de sinalização",critica:false},
              {descricao:"Objeto não identificado",critica:true},{descricao:"Congestionamento",critica:false}];
   const ev=evs[Math.floor(Math.random()*evs.length)];
   fetch(`/api/areas/${id}/ocorrencia`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)});
 }
-function dispGlobal() {
-  const online=(E.areas||[]).filter(a=>a.online&&!a.pausada);
-  if (online.length) dispManual(online[Math.floor(Math.random()*online.length)].area_id);
+function openOcorrencia(areaId=null) {
+  const sel = document.getElementById('oa');
+  const areas = (E.areas||[]).filter(a=>a.online);
+  sel.innerHTML = areas.map(a=>`<option value="${a.area_id}">${a.area_nome||a.area_id}</option>`).join('');
+  if (areaId) sel.value = areaId;
+  document.getElementById('mo-ocorrencia').classList.add('show');
+}
+function cadOcorrencia() {
+  const area = document.getElementById('oa').value;
+  apiFetch(`/api/areas/${area}/ocorrencia`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({descricao:document.getElementById('od').value||'Ocorrência manual',
+      critica:document.getElementById('oc').value==='true'})}, 'Ocorrência criada')
+  .then(closeM).catch(e=>toast(e.message,false));
+}
+function setIntervalo(id) {
+  const v = parseFloat(document.getElementById('iv-'+id).value || '10');
+  apiFetch(`/api/areas/${id}/intervalo`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({intervalo:v})}, 'Intervalo atualizado')
+  .catch(e=>toast(e.message,false));
+}
+function falhaDrone(id) {
+  if (!confirm('Simular falha do drone '+id+'?')) return;
+  apiFetch(`/api/drones/${id}/falha`,{method:'POST'},'Falha registrada e replanejamento disparado')
+    .then(()=>setTimeout(renderCrud,500)).catch(e=>toast(e.message,false));
+}
+function redistribuirTorre(id) {
+  apiFetch(`/api/torres/${id}/redistribuir`,{method:'POST'},'Redistribuição solicitada')
+    .catch(e=>toast(e.message,false));
 }
 
 // CRUD
@@ -541,7 +620,10 @@ function renderCrud() {
     document.getElementById('cr-drones').innerHTML=ds.length ? ds.map(d=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
         <div><span style="font-weight:500">${d.nome}</span><span style="font-size:11px;color:var(--mu);margin-left:6px">${d.id}</span></div>
-        <button class="btn brc" onclick="rmDrone('${d.id}')">🗑</button>
+        <div style="display:flex;gap:5px">
+          <button class="btn byc" onclick="falhaDrone('${d.id}')">falha</button>
+          <button class="btn brc" onclick="rmDrone('${d.id}')">🗑</button>
+        </div>
       </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhum drone encontrado. Verifique se as torres estão online.</div>';
   });
   fetch('/api/torres').then(r=>r.json()).then(ts=>{
@@ -551,7 +633,10 @@ function renderCrud() {
           <span style="font-weight:500">${t.torre_nome||t.torre_id}</span>
           <span class="clock-badge" style="margin-left:4px">L=${t.clock_lamport||0}</span>
         </div>
-        <button class="btn brc" onclick="rmTorre('${t.torre_id||t.id}')">🗑</button>
+        <div style="display:flex;gap:5px">
+          ${!t.online ? `<button class="btn bbc" onclick="redistribuirTorre('${t.torre_id||t.id}')">redistribuir</button>` : ''}
+          <button class="btn brc" onclick="rmTorre('${t.torre_id||t.id}')">🗑</button>
+        </div>
       </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhuma torre cadastrada.</div>';
   });
   fetch('/api/areas').then(r=>r.json()).then(as=>{
