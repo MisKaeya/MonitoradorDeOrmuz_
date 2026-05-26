@@ -2,9 +2,11 @@
 import os
 
 #  IPs das máquinas
-MAQUINA_TORRES_IP  = os.environ.get("MAQUINA_TORRES_IP",  "192.168.1.10")
-MAQUINA_BROKERS_IP = os.environ.get("MAQUINA_BROKERS_IP", "192.168.1.20")
-MAQUINA_WEB_IP     = os.environ.get("MAQUINA_WEB_IP",     "192.168.1.30")
+# Em execução local fora do Docker, localhost é o padrão. Nos arquivos
+# docker-compose, o padrão é sobrescrito para host.docker.internal.
+MAQUINA_TORRES_IP  = os.environ.get("MAQUINA_TORRES_IP",  "127.0.0.1")
+MAQUINA_BROKERS_IP = os.environ.get("MAQUINA_BROKERS_IP", "127.0.0.1")
+MAQUINA_WEB_IP     = os.environ.get("MAQUINA_WEB_IP",     "127.0.0.1")
 
 #  Torres
 TORRES = {

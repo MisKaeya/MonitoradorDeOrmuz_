@@ -11,9 +11,9 @@ services:
     container_name: ormuz-web
     extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
-      MAQUINA_TORRES_IP:  "${MAQUINA_TORRES_IP:-192.168.1.10}"
-      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-192.168.1.20}"
-      MAQUINA_WEB_IP:     "${MAQUINA_WEB_IP:-192.168.1.30}"
+      MAQUINA_TORRES_IP:  "${MAQUINA_TORRES_IP:-host.docker.internal}"
+      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-host.docker.internal}"
+      MAQUINA_WEB_IP:     "${MAQUINA_WEB_IP:-host.docker.internal}"
       WEB_PORTA: "8080"
     ports: ["8080:8080"]
     volumes:

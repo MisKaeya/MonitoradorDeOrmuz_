@@ -284,12 +284,18 @@ button.btn:hover{opacity:.8;}
 <div id="toast" class="toast"></div>
 
 <script>
-const socket = io();
+const socket = window.io ? io() : null;
 let E = {}, mapaOk = false, mapaObj = null, marks = {}, logVisto = new Set();
 
-socket.on('connect',    () => setConn(true));
-socket.on('disconnect', () => setConn(false));
-socket.on('estado', d  => { E = d; render(d); });
+if (socket) {
+  socket.on('connect',    () => setConn(true));
+  socket.on('disconnect', () => setConn(false));
+  socket.on('estado', d  => { E = d; render(d); });
+} else {
+  setConn(false);
+}
+setInterval(refreshEstado, 3000);
+refreshEstado();
 
 function setConn(ok) {
   document.getElementById('dot').style.background = ok ? 'var(--gr)' : 'var(--rd)';

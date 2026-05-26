@@ -14,8 +14,8 @@ services:
       TORRE_NOME:        "Torre Alpha"
       TORRE_PORT:        "6001"
       TORRE_HTTP_PORT:   "6101"
-      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
-      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-192.168.1.20}"
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-host.docker.internal}"
+      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-host.docker.internal}"
       DRONES_JSON: '[{"id":"falcon-1a","nome":"Falcon-1A"},{"id":"falcon-1b","nome":"Falcon-1B"}]'
     ports: ["6001:6001","6101:6101"]
     networks: [ormuz-torres]
@@ -30,8 +30,8 @@ services:
       TORRE_NOME:        "Torre Bravo"
       TORRE_PORT:        "6002"
       TORRE_HTTP_PORT:   "6102"
-      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
-      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-192.168.1.20}"
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-host.docker.internal}"
+      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-host.docker.internal}"
       DRONES_JSON: '[{"id":"falcon-2a","nome":"Falcon-2A"},{"id":"falcon-2b","nome":"Falcon-2B"}]'
     ports: ["6002:6002","6102:6102"]
     networks: [ormuz-torres]
@@ -46,8 +46,8 @@ services:
       TORRE_NOME:        "Torre Charlie"
       TORRE_PORT:        "6003"
       TORRE_HTTP_PORT:   "6103"
-      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
-      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-192.168.1.20}"
+      MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-host.docker.internal}"
+      MAQUINA_BROKERS_IP: "${MAQUINA_BROKERS_IP:-host.docker.internal}"
       DRONES_JSON: '[{"id":"falcon-3a","nome":"Falcon-3A"},{"id":"falcon-3b","nome":"Falcon-3B"}]'
     ports: ["6003:6003","6103:6103"]
     networks: [ormuz-torres]
