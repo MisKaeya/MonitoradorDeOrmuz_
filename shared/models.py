@@ -41,6 +41,7 @@ class Drone:
     id:                  str
     nome:                str
     torre_base:          str
+    torre_origem:        Optional[str] = None
     disponivel:          bool  = True
     requisicao_atual:    Optional[str] = None
     ultimo_heartbeat:    float = field(default_factory=time.time)

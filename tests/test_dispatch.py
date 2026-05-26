@@ -101,9 +101,11 @@ class DispatchTest(unittest.TestCase):
         self.assertTrue(resp["ok"])
         self.assertIn("peer-drone", torre.drones)
         self.assertEqual(torre.drones["peer-drone"].torre_base, torre.TORRE_ID)
+        self.assertEqual(torre.drones["peer-drone"].torre_origem, "torre-2")
         self.assertIn("req-peer", torre.missoes)
         self.assertEqual(torre.missoes["req-peer"].status, "alocada")
         self.assertEqual(torre.redistribuicoes[0]["torre_origem"], "torre-2")
+        self.assertEqual(torre.redistribuicoes[0]["drones_ids"], ["peer-drone"])
 
 
 if __name__ == "__main__":

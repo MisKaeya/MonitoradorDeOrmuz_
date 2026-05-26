@@ -8,6 +8,7 @@ services:
   area-01:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_01.py } }
     container_name: area-01
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-01
@@ -21,6 +22,7 @@ services:
   area-02:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_02.py } }
     container_name: area-02
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-02
@@ -34,6 +36,7 @@ services:
   area-03:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_03.py } }
     container_name: area-03
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-03
@@ -47,6 +50,7 @@ services:
   area-04:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_04.py } }
     container_name: area-04
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-04
@@ -60,6 +64,7 @@ services:
   area-05:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_05.py } }
     container_name: area-05
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-05
@@ -73,6 +78,7 @@ services:
   area-06:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_06.py } }
     container_name: area-06
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-06
@@ -86,6 +92,7 @@ services:
   area-07:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_07.py } }
     container_name: area-07
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-07
@@ -99,6 +106,7 @@ services:
   area-08:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_08.py } }
     container_name: area-08
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-08
@@ -112,6 +120,7 @@ services:
   area-09:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_09.py } }
     container_name: area-09
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-09
@@ -125,6 +134,7 @@ services:
   area-10:
     build: { context: ., dockerfile: brokers/Dockerfile, args: { AREA_FILE: area_10.py } }
     container_name: area-10
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       MAQUINA_TORRES_IP: "${MAQUINA_TORRES_IP:-192.168.1.10}"
       AREA_ID: area-10

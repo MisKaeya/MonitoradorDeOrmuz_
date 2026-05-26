@@ -379,12 +379,18 @@ function renderTorres(ts) {
         Missões: ${t.requisicoes_ativas||0} | Fila: ${t.fila_tamanho||0}
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
-        ${!t.online ? `<button class="btn bbc" onclick="redistribuirTorre('${t.torre_id}')">Redistribuir</button>` : ''}
+        ${t.online
+          ? `<button class="btn brc" onclick="derrubarTorre('${t.torre_id}')">Derrubar</button>`
+          : `<button class="btn bg2c" onclick="levantarTorre('${t.torre_id}')">Levantar</button>
+             <button class="btn bbc" onclick="redistribuirTorre('${t.torre_id}')">Redistribuir</button>`}
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
         ${(t.drones||[]).map(d=>`
           <div class="dp ${d.disponivel?'liv':'mis'}">
-            <span>🚁 ${d.nome}</span>
+            <span>
+              🚁 ${d.nome}
+              <span style="display:block;color:var(--mu);font-size:10px">op: ${t.torre_id}${d.torre_origem&&d.torre_origem!==t.torre_id?' | origem: '+d.torre_origem:''}</span>
+            </span>
             <span>
               <span class="badge ${d.disponivel?'bg':'by'}">${d.disponivel?'livre':'missão'}</span>
               <button class="btn brc" style="padding:2px 6px;margin-left:4px" onclick="falhaDrone('${d.id}')">falha</button>
@@ -404,6 +410,9 @@ function renderAreas(areas) {
             ? `<button class="btn bg2c" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','retomar')">▶</button>`
             : `<button class="btn byc" style="padding:3px 8px;font-size:11px" onclick="acao('${a.area_id}','pausar')">⏸</button>`}
           <button class="btn bbc" style="padding:3px 8px;font-size:11px" onclick="openOcorrencia('${a.area_id}')">⚡</button>
+          ${a.online
+            ? `<button class="btn brc" style="padding:3px 8px;font-size:11px" onclick="derrubarArea('${a.area_id}')">off</button>`
+            : `<button class="btn bg2c" style="padding:3px 8px;font-size:11px" onclick="levantarArea('${a.area_id}')">on</button>`}
         </div>
       </div>
       <div style="font-size:11px;color:var(--mu)">
@@ -465,11 +474,13 @@ function renderRedistribuicoes(items) {
   }
   el.innerHTML = items.slice(0,8).map(x => {
     const ts = new Date((x.timestamp||0)*1000).toLocaleTimeString('pt-BR');
+    const drones = (x.drones_ids||[]).length ? ` (${(x.drones_ids||[]).join(', ')})` : '';
+    const reqs = (x.requisicoes_ids||[]).length ? ` (${(x.requisicoes_ids||[]).join(', ')})` : '';
     return `<div class="tl-item">
       <div class="tl-dot" style="background:var(--bl)"></div>
       <div class="tl-body">
         <div style="font-weight:500">${x.torre_origem} → ${x.torre_destino}</div>
-        <div style="color:var(--mu);font-size:11px">${x.drones||0} drones assumidos; ${x.requisicoes||0} requisições replanejadas</div>
+        <div style="color:var(--mu);font-size:11px">${x.drones||0} drones transferidos${drones}; ${x.requisicoes||0} requisições replanejadas${reqs}</div>
       </div>
       <div class="tl-time"><span class="clock-badge">L=${x.clock_lamport||0}</span><br>${ts}</div>
     </div>`;
@@ -559,11 +570,29 @@ function setIntervalo(id) {
 function falhaDrone(id) {
   if (!confirm('Simular falha do drone '+id+'?')) return;
   apiFetch(`/api/drones/${id}/falha`,{method:'POST'},'Falha registrada e replanejamento disparado')
-    .then(()=>setTimeout(renderCrud,500)).catch(e=>toast(e.message,false));
+    .then(()=>setTimeout(()=>{refreshEstado();renderCrud();},500)).catch(e=>toast(e.message,false));
 }
 function redistribuirTorre(id) {
   apiFetch(`/api/torres/${id}/redistribuir`,{method:'POST'},'Redistribuição solicitada')
-    .catch(e=>toast(e.message,false));
+    .then(()=>setTimeout(refreshEstado,500)).catch(e=>toast(e.message,false));
+}
+function derrubarTorre(id) {
+  if (!confirm('Derrubar '+id+' e redistribuir seus drones/requisições?')) return;
+  apiFetch(`/api/torres/${id}/derrubar`,{method:'POST'},'Torre derrubada')
+    .then(()=>setTimeout(refreshEstado,700)).catch(e=>toast(e.message,false));
+}
+function levantarTorre(id) {
+  apiFetch(`/api/torres/${id}/levantar`,{method:'POST'},'Torre levantada')
+    .then(()=>setTimeout(refreshEstado,1200)).catch(e=>toast(e.message,false));
+}
+function derrubarArea(id) {
+  if (!confirm('Derrubar '+id+'?')) return;
+  apiFetch(`/api/areas/${id}/derrubar`,{method:'POST'},'Área derrubada')
+    .then(()=>setTimeout(refreshEstado,700)).catch(e=>toast(e.message,false));
+}
+function levantarArea(id) {
+  apiFetch(`/api/areas/${id}/levantar`,{method:'POST'},'Área levantada')
+    .then(()=>setTimeout(refreshEstado,1200)).catch(e=>toast(e.message,false));
 }
 
 // CRUD
@@ -585,6 +614,13 @@ async function apiFetch(url, opts={}, msgOk='Operação realizada') {
   if (!r.ok || data.erro) throw new Error(data.erro || `HTTP ${r.status}`);
   toast(msgOk);
   return data;
+}
+
+function refreshEstado() {
+  return fetch('/api/estado')
+    .then(r=>r.json())
+    .then(d=>{ E = d; render(d); return d; })
+    .catch(()=>{});
 }
 
 function cadDrone() {
@@ -619,7 +655,10 @@ function renderCrud() {
   fetch('/api/drones').then(r=>r.json()).then(ds=>{
     document.getElementById('cr-drones').innerHTML=ds.length ? ds.map(d=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
-        <div><span style="font-weight:500">${d.nome}</span><span style="font-size:11px;color:var(--mu);margin-left:6px">${d.id}</span></div>
+        <div>
+          <span style="font-weight:500">${d.nome}</span><span style="font-size:11px;color:var(--mu);margin-left:6px">${d.id}</span>
+          <div style="font-size:10px;color:var(--mu)">op: ${d.torre_base||'?' }${d.torre_origem&&d.torre_origem!==d.torre_base?' | origem: '+d.torre_origem:''}</div>
+        </div>
         <div style="display:flex;gap:5px">
           <button class="btn byc" onclick="falhaDrone('${d.id}')">falha</button>
           <button class="btn brc" onclick="rmDrone('${d.id}')">🗑</button>
@@ -634,8 +673,10 @@ function renderCrud() {
           <span class="clock-badge" style="margin-left:4px">L=${t.clock_lamport||0}</span>
         </div>
         <div style="display:flex;gap:5px">
-          ${!t.online ? `<button class="btn bbc" onclick="redistribuirTorre('${t.torre_id||t.id}')">redistribuir</button>` : ''}
-          <button class="btn brc" onclick="rmTorre('${t.torre_id||t.id}')">🗑</button>
+          ${t.online
+            ? `<button class="btn brc" onclick="derrubarTorre('${t.torre_id||t.id}')">derrubar</button>`
+            : `<button class="btn bg2c" onclick="levantarTorre('${t.torre_id||t.id}')">levantar</button>
+               <button class="btn bbc" onclick="redistribuirTorre('${t.torre_id||t.id}')">redistribuir</button>`}
         </div>
       </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhuma torre cadastrada.</div>';
   });
@@ -643,7 +684,11 @@ function renderCrud() {
     document.getElementById('cr-areas').innerHTML=as.length ? as.map(a=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)44">
         <div style="font-size:12px">${a.area_nome||a.area_id}</div>
-        <button class="btn brc" onclick="rmArea('${a.area_id}')">🗑</button>
+        <div style="display:flex;gap:5px">
+          ${a.online
+            ? `<button class="btn brc" onclick="derrubarArea('${a.area_id}')">derrubar</button>`
+            : `<button class="btn bg2c" onclick="levantarArea('${a.area_id}')">levantar</button>`}
+        </div>
       </div>`).join('') : '<div style="color:var(--mu);font-size:12px;padding:8px 0">Nenhuma área cadastrada.</div>';
   });
 }

@@ -70,7 +70,7 @@ def _init_peers():
 def _init_drones():
     raw = os.environ.get("DRONES_JSON", "[]")
     for d in json.loads(raw):
-        drone = Drone(id=d["id"], nome=d["nome"], torre_base=TORRE_ID)
+        drone = Drone(id=d["id"], nome=d["nome"], torre_base=TORRE_ID, torre_origem=TORRE_ID)
         drones[drone.id] = drone
         log(f"Drone pronto: {drone.nome} ({drone.id})", G)
 
@@ -271,10 +271,15 @@ def _handle_liberar_drone(payload: dict) -> dict:
             del historico[60:]
 
         if drone_id in drones:
-            drones[drone_id].disponivel = True
-            drones[drone_id].requisicao_atual = None
-            drones[drone_id].ultimo_heartbeat = time.time()
-            drones[drone_id].missoes_concluidas += 1
+            drone = drones[drone_id]
+            origem = drone.torre_origem or drone.torre_base
+            if origem != TORRE_ID and origem not in peers_offline:
+                drones.pop(drone_id, None)
+            else:
+                drone.disponivel = True
+                drone.requisicao_atual = None
+                drone.ultimo_heartbeat = time.time()
+                drone.missoes_concluidas += 1
 
     relogio.tick()
     log(f"Drone liberado drone={drone_id} req={req_id}", G)
@@ -348,7 +353,13 @@ def _responsavel_por_peer_indisponivel(torre_id: str) -> str | None:
     return ativos[sum(torre_id.encode("utf-8")) % len(ativos)]
 
 
-def _registrar_redistribuicao(torre_id: str, drones_qtd: int, reqs_qtd: int):
+def _registrar_redistribuicao(
+    torre_id: str,
+    drones_qtd: int,
+    reqs_qtd: int,
+    drones_ids: list[str] | None = None,
+    reqs_ids: list[str] | None = None,
+):
     redistribuicoes.insert(
         0,
         {
@@ -356,6 +367,8 @@ def _registrar_redistribuicao(torre_id: str, drones_qtd: int, reqs_qtd: int):
             "torre_destino": TORRE_ID,
             "drones": drones_qtd,
             "requisicoes": reqs_qtd,
+            "drones_ids": drones_ids or [],
+            "requisicoes_ids": reqs_ids or [],
             "clock_lamport": relogio.tick(),
             "timestamp": time.time(),
         },
@@ -380,17 +393,21 @@ def _assumir_snapshot_torre(torre_id: str, motivo: str = "falha_torre") -> dict:
 
         drones_assumidos = 0
         reqs_replanejadas = 0
+        drones_ids: list[str] = []
+        reqs_ids: list[str] = []
 
         for item in snap.get("drones", []):
             drone = Drone.from_dict(item)
             if drone.id in drones:
                 continue
+            drone.torre_origem = drone.torre_origem or torre_id
             drone.torre_base = TORRE_ID
             drone.disponivel = True
             drone.requisicao_atual = None
             drone.ultimo_heartbeat = time.time()
             drones[drone.id] = drone
             drones_assumidos += 1
+            drones_ids.append(drone.id)
 
         pendentes = list(snap.get("fila", [])) + list(snap.get("missoes", []))
         for item in pendentes:
@@ -404,9 +421,10 @@ def _assumir_snapshot_torre(torre_id: str, motivo: str = "falha_torre") -> dict:
             req.clock_lamport = relogio.tick()
             if _enfileirar(req):
                 reqs_replanejadas += 1
+                reqs_ids.append(req.id)
 
         peers_offline.add(torre_id)
-        _registrar_redistribuicao(torre_id, drones_assumidos, reqs_replanejadas)
+        _registrar_redistribuicao(torre_id, drones_assumidos, reqs_replanejadas, drones_ids, reqs_ids)
 
     if drones_assumidos or reqs_replanejadas:
         log(
@@ -422,6 +440,8 @@ def _assumir_snapshot_torre(torre_id: str, motivo: str = "falha_torre") -> dict:
         "torre_destino": TORRE_ID,
         "drones": drones_assumidos,
         "requisicoes": reqs_replanejadas,
+        "drones_ids": drones_ids,
+        "requisicoes_ids": reqs_ids,
     }
 
 
@@ -429,6 +449,11 @@ def _handle_redistribuir_torre(payload: dict) -> dict:
     torre_id = payload.get("torre_id")
     if not torre_id:
         return {"tipo": "ERRO", "payload": {"erro": "torre_id obrigatorio"}}
+    snapshot = payload.get("snapshot")
+    if snapshot:
+        with _lock:
+            snapshot["torre_id"] = torre_id
+            peer_snapshots[torre_id] = snapshot
     return {"tipo": "ACK", "payload": _assumir_snapshot_torre(torre_id, "comando")}
 
 
@@ -446,6 +471,7 @@ def _handle_cadastrar_drone(payload: dict) -> dict:
         id=payload.get("id", f"drone-{uuid.uuid4().hex[:6]}"),
         nome=payload.get("nome", "Novo Drone"),
         torre_base=payload.get("torre_base", TORRE_ID),
+        torre_origem=payload.get("torre_origem") or payload.get("torre_base", TORRE_ID),
     )
     with _lock:
         drones[drone.id] = drone
@@ -523,8 +549,7 @@ def _monitor_peers():
     while True:
         time.sleep(6)
         for torre_id in list(peers.keys()):
-            if torre_id in peers_offline:
-                continue
+            estava_offline = torre_id in peers_offline
             resp = _enviar_tcp_e_receber(torre_id, "CONSULTA_ESTADO", {}, tentativas=1)
             if resp is None:
                 with _lock:
@@ -547,6 +572,20 @@ def _monitor_peers():
                         "timestamp": payload.get("timestamp", time.time()),
                     }
                     peers_offline.discard(torre_id)
+                if estava_offline:
+                    _limpar_drones_redistribuidos_ociosos(torre_id)
+
+
+def _limpar_drones_redistribuidos_ociosos(torre_id: str):
+    removidos = []
+    with _lock:
+        for drone_id, drone in list(drones.items()):
+            if drone.torre_origem == torre_id and drone.disponivel and drone.requisicao_atual is None:
+                drones.pop(drone_id, None)
+                removidos.append(drone_id)
+    if removidos:
+        log(f"Torre {torre_id} voltou; drones ociosos devolvidos: {', '.join(removidos)}", G)
+        threading.Thread(target=_sync_peers, daemon=True).start()
 
 
 def _montar_estado() -> dict:

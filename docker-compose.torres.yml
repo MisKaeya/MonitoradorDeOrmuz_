@@ -8,6 +8,7 @@ services:
   torre-1:
     build: { context: ., dockerfile: torres/Dockerfile }
     container_name: torre-1
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       TORRE_ID:          torre-1
       TORRE_NOME:        "Torre Alpha"
@@ -23,6 +24,7 @@ services:
   torre-2:
     build: { context: ., dockerfile: torres/Dockerfile }
     container_name: torre-2
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       TORRE_ID:          torre-2
       TORRE_NOME:        "Torre Bravo"
@@ -38,6 +40,7 @@ services:
   torre-3:
     build: { context: ., dockerfile: torres/Dockerfile }
     container_name: torre-3
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       TORRE_ID:          torre-3
       TORRE_NOME:        "Torre Charlie"

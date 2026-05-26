@@ -3,7 +3,7 @@ INTERFACE WEB — Dashboard + CRUD
 Consulta as torres e áreas via HTTP (porta secundária).
 Comunicação pesada (TCP + Lamport) fica entre os componentes operacionais.
 """
-import os, sys, time, threading, requests, json
+import os, sys, time, threading, requests, json, socket
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -21,6 +21,8 @@ TO = 2   # timeout HTTP para polling
 
 _areas_extra  = {}
 _torres_extra = {}
+CONTAINERS_TORRES = {tid: tid for tid in TORRES}
+CONTAINERS_AREAS = {aid: aid for aid in BROKERS}
 
 # ── Coleta ────────────────────────────────────────────────────────────────────
 def _get_torre(torre_id: str, info: dict) -> dict:
@@ -94,6 +96,54 @@ def _post_torre(torre_id: str, path: str, payload: dict | None = None):
     return requests.post(f"http://{info['host']}:{http_port}{path}", json=payload or {}, timeout=TO)
 
 
+def _docker_request(method: str, path: str) -> tuple[int, dict]:
+    sock_path = "/var/run/docker.sock"
+    if not os.path.exists(sock_path):
+        return 503, {"erro": "socket Docker nao montado na interface web"}
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(5)
+        s.connect(sock_path)
+        req = (
+            f"{method} {path} HTTP/1.1\r\n"
+            "Host: docker\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        s.sendall(req.encode("utf-8"))
+        chunks = []
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+
+    raw = b"".join(chunks)
+    head, _, body = raw.partition(b"\r\n\r\n")
+    status_line = head.splitlines()[0].decode("utf-8", errors="replace")
+    status = int(status_line.split()[1])
+    if not body:
+        return status, {"ok": 200 <= status < 300}
+    try:
+        return status, json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return status, {"ok": 200 <= status < 300, "raw": body.decode("utf-8", errors="replace")}
+
+
+def _container_action(container_name: str, action: str) -> tuple[dict, int]:
+    if action == "start":
+        status, data = _docker_request("POST", f"/containers/{container_name}/start")
+        if status in (204, 304):
+            return {"ok": True, "container": container_name, "acao": "start"}, 200
+    elif action == "stop":
+        status, data = _docker_request("POST", f"/containers/{container_name}/stop?t=2")
+        if status in (204, 304):
+            return {"ok": True, "container": container_name, "acao": "stop"}, 200
+    else:
+        return {"erro": "acao invalida"}, 400
+    return {"erro": data.get("message") or data.get("erro") or f"Docker HTTP {status}"}, status
+
+
 def _pusher():
     while True:
         time.sleep(3)
@@ -151,12 +201,22 @@ def api_del_torre(torre_id):
 
 @app.route("/api/torres/<torre_id>/redistribuir", methods=["POST"])
 def api_redistribuir_torre(torre_id):
+    info_origem = _torres_config().get(torre_id)
+    snapshot = None
+    if info_origem:
+        estado = _get_torre(torre_id, info_origem)
+        if estado.get("online"):
+            snapshot = estado
+
     resultados = []
     for destino, info in _torres_config().items():
         if destino == torre_id:
             continue
         try:
-            r = _post_torre(destino, "/redistribuir_torre", {"torre_id": torre_id})
+            payload = {"torre_id": torre_id}
+            if snapshot:
+                payload["snapshot"] = snapshot
+            r = _post_torre(destino, "/redistribuir_torre", payload)
             if r is not None and r.ok:
                 data = r.json()
                 resultados.append({"destino": destino, **data})
@@ -167,6 +227,44 @@ def api_redistribuir_torre(torre_id):
     return jsonify({"ok": False, "erro": "nenhuma torre assumiu o snapshot", "resultados": resultados}), 409
 
 
+@app.route("/api/torres/<torre_id>/derrubar", methods=["POST"])
+def api_derrubar_torre(torre_id):
+    container = CONTAINERS_TORRES.get(torre_id)
+    if not container:
+        return jsonify({"erro": "torre sem container conhecido"}), 404
+
+    info_origem = _torres_config().get(torre_id)
+    snapshot = _get_torre(torre_id, info_origem) if info_origem else None
+
+    data, status = _container_action(container, "stop")
+    if status >= 400:
+        return jsonify(data), status
+
+    resultados = []
+    try:
+        for destino in _torres_config().keys():
+            if destino != torre_id:
+                payload = {"torre_id": torre_id}
+                if snapshot and snapshot.get("online"):
+                    payload["snapshot"] = snapshot
+                r = _post_torre(destino, "/redistribuir_torre", payload)
+                if r is not None and r.ok:
+                    resultados.append({"destino": destino, **r.json()})
+    except Exception as exc:
+        resultados.append({"ok": False, "erro": str(exc)})
+
+    return jsonify({**data, "redistribuicao": resultados}), status
+
+
+@app.route("/api/torres/<torre_id>/levantar", methods=["POST"])
+def api_levantar_torre(torre_id):
+    container = CONTAINERS_TORRES.get(torre_id)
+    if not container:
+        return jsonify({"erro": "torre sem container conhecido"}), 404
+    data, status = _container_action(container, "start")
+    return jsonify(data), status
+
+
 # ── Drones ────────────────────────────────────────────────────────────────────
 @app.route("/api/drones", methods=["GET"])
 def api_drones():
@@ -175,7 +273,10 @@ def api_drones():
 
 @app.route("/api/drones", methods=["POST"])
 def api_add_drone():
-    data      = request.get_json()
+    return _api_add_drone_payload(request.get_json())
+
+
+def _api_add_drone_payload(data: dict):
     torre_alvo = data.get("torre_base", list(TORRES.keys())[0])
     todas      = _torres_config()
     info       = todas.get(torre_alvo) or list(todas.values())[0]
@@ -215,6 +316,14 @@ def api_falha_drone(drone_id):
         except Exception:
             pass
     return jsonify({"erro": "drone não encontrado"}), 404
+
+
+@app.route("/api/drones/<drone_id>/levantar", methods=["POST"])
+def api_levantar_drone(drone_id):
+    data = request.get_json(silent=True) or {}
+    torre_alvo = data.get("torre_base") or data.get("torre_id") or list(TORRES.keys())[0]
+    nome = data.get("nome") or drone_id
+    return _api_add_drone_payload({"id": drone_id, "nome": nome, "torre_base": torre_alvo})
 
 
 # ── Áreas ─────────────────────────────────────────────────────────────────────
@@ -301,6 +410,24 @@ def api_intervalo(area_id):
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
+
+
+@app.route("/api/areas/<area_id>/derrubar", methods=["POST"])
+def api_derrubar_area(area_id):
+    container = CONTAINERS_AREAS.get(area_id)
+    if not container:
+        return jsonify({"erro": "area sem container conhecido"}), 404
+    data, status = _container_action(container, "stop")
+    return jsonify(data), status
+
+
+@app.route("/api/areas/<area_id>/levantar", methods=["POST"])
+def api_levantar_area(area_id):
+    container = CONTAINERS_AREAS.get(area_id)
+    if not container:
+        return jsonify({"erro": "area sem container conhecido"}), 404
+    data, status = _container_action(container, "start")
+    return jsonify(data), status
 
 
 @app.route("/api/ocorrencias_tipos")
